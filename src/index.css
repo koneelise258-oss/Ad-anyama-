@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------
+   Système de design — Assemblées de Dieu d’Anyama, Ran Extension Rés.
+   Palette officielle uniquement. Pas de dégradés décoratifs, pas d’ombres.
+   ------------------------------------------------------------------ */
+@theme {
+  --color-church-blue: #2854A6;   /* Bleu principal : actions, liens, repères */
+  --color-church-navy: #173567;   /* Bleu foncé : titres, pied de page */
+  --color-church-light: #F4F6F9;  /* Gris clair : fond de page */
+  --color-church-dark: #343B46;   /* Gris foncé : texte courant */
+  --color-church-white: #FFFFFF;
+  --color-church-line: #E1E6EE;   /* Filets et bordures */
+  --color-church-muted: #5E6672;  /* Texte secondaire (contraste AA sur blanc) */
+  --color-church-tint: #EAF0FA;   /* Fond bleuté très léger (état actif) */
+
+  --font-sans: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+}
+
+@layer base {
+  html { scroll-padding-top: 5rem; }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--color-church-dark);
+    background-color: var(--color-church-light);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, .font-heading {
+    font-family: var(--font-serif);
+    color: var(--color-church-navy);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  h4, h5, h6 {
+    font-family: var(--font-sans);
+    color: var(--color-church-navy);
+    font-weight: 600;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-church-blue);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Conteneur de page */
+  .page { @apply mx-auto w-full max-w-6xl px-4 sm:px-6; }
+
+  /* Boutons */
+  .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-on-dark {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors;
+    min-height: 44px;
+  }
+  .btn-primary { @apply bg-church-blue text-white hover:bg-church-navy; }
+  .btn-secondary { @apply border border-church-line bg-white text-church-navy hover:border-church-blue; }
+  .btn-ghost { @apply px-2 text-church-blue hover:text-church-navy; }
+  .btn-on-dark { @apply border border-white/30 text-white hover:bg-white/10; }
+
+  /* Surfaces */
+  .surface { @apply rounded-lg border border-church-line bg-white; }
+
+  /* Lien de rubrique */
+  .link { @apply font-semibold text-church-blue underline-offset-4 hover:underline; }
+
+  /* Puces de filtre */
+  .chip, .chip-active {
+    @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-church-line bg-white px-3.5 text-sm font-medium text-church-dark transition-colors hover:border-church-blue;
+    min-height: 38px;
+  }
+  .chip-active { @apply border-church-navy bg-church-navy text-white hover:border-church-navy; }
+
+  /* Mention de démonstration */
+  .demo-tag { @apply inline-flex items-center rounded border border-dashed border-church-line px-1.5 py-0.5 text-[11px] font-medium text-church-muted; }
+
+  /* Champs */
+  .field {
+    @apply w-full rounded-md border border-church-line bg-white px-3.5 text-[15px] text-church-dark placeholder:text-church-muted/80 focus:border-church-blue focus:outline-none;
+    min-height: 44px;
+  }
+}
+
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd2dc; border-radius: 9999px; }

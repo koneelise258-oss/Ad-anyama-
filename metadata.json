@@ -1,0 +1,6 @@
+{
+  "name": "Église Évangélique des Assemblées de Dieu de Anyama, Ran-Extension Résidentiel",
+  "description": "Plateforme officielle de communication de l’Église Évangélique des Assemblées de Dieu de Anyama, Ran-Extension Résidentiel (Côte d’Ivoire) : cultes, prédications, galerie, événements, actualités et départements.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
