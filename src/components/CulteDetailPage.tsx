@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { Culte } from '../types';
-import { Play, Download, ThumbsUp, Heart, Flag, Headphones, FileText } from 'lucide-react';
+import { HERO_IMAGE } from '../mockData';
+import { buildDownloadUrl, isDirectVideoUrl, sanitizeUrl, toSafeYoutubeEmbed } from '../utils/security';
+import { Play, Download, ThumbsUp, Heart, Flag, Headphones, Eye, ExternalLink } from 'lucide-react';
 import { BackBar, BlockTitle, Lightbox, Meta, formatDate, useToast } from './ui';
+import { MediaViewerSection } from './MediaViewerSection';
+import { CULTE_TYPE_LABELS, inferCulteServiceType } from '../utils/cultes';
 
 interface CulteDetailPageProps {
   culte: Culte;
@@ -15,7 +19,6 @@ interface CulteDetailPageProps {
 type ReactionType = 'likes' | 'hearts' | 'prayers';
 const REACTED_KEY = 'eeadci_reacted';
 
-/** Réactions déjà données sur cet appareil (évite les doubles clics après rechargement). */
 const readReacted = (): Record<string, ReactionType[]> => {
   try {
     return JSON.parse(localStorage.getItem(REACTED_KEY) || '{}');
@@ -23,8 +26,6 @@ const readReacted = (): Record<string, ReactionType[]> => {
     return {};
   }
 };
-
-const isRealLink = (url?: string) => !!url && url !== '#';
 
 export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
   culte,
@@ -37,13 +38,18 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
   const toast = useToast();
   const [reacted, setReacted] = useState<ReactionType[]>(() => readReacted()[culte.id] || []);
   const [playing, setPlaying] = useState(false);
+  const [showAudio, setShowAudio] = useState(true);
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [text, setText] = useState('');
   const [check, setCheck] = useState('');
-  const [hp, setHp] = useState(''); // champ invisible anti-robot
+  const [hp, setHp] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [reportedIds, setReportedIds] = useState<string[]>([]);
+
+  const safeVideo = culte.videoUrl ? sanitizeUrl(toSafeYoutubeEmbed(culte.videoUrl), false) : '';
+  const safeAudio = culte.audioUrl ? sanitizeUrl(culte.audioUrl, false) : '';
+  const isDirectVideo = isDirectVideoUrl(safeVideo);
 
   const react = (type: ReactionType) => {
     if (reacted.includes(type)) return;
@@ -60,7 +66,7 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (hp) return; // robot
+    if (hp) return;
     if (!name.trim() || !text.trim()) {
       setError('Indiquez un pseudonyme et votre message.');
       return;
@@ -76,14 +82,22 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
   };
 
   const keyPoints = (culte.keyPoints || []).map((p) => p.replace(/^\s*\d+[.)]\s*/, '')).filter(Boolean);
-  const docs = culte.documents || [];
-  const photos = culte.photos || [];
+  const docs = (culte.documents || []).filter((d) => !!sanitizeUrl(d.downloadUrl));
+  const photos = (culte.photos || []).map((p) => sanitizeUrl(p)).filter(Boolean);
+  const extraMediaItems = (culte.mediaItems || []).filter(
+    (m) =>
+      sanitizeUrl(m.url) &&
+      m.url !== safeVideo &&
+      m.url !== safeAudio &&
+      !(m.type === 'photo' && photos.includes(sanitizeUrl(m.url)))
+  );
 
   const sections = [
     { id: 'message', label: 'Message', show: !!(culte.scriptureRef || culte.sermonSummary || keyPoints.length) },
     { id: 'deroulement', label: 'Déroulement', show: (culte.liturgy || []).length > 0 },
     { id: 'photos', label: `Photos (${photos.length})`, show: photos.length > 0 },
-    { id: 'documents', label: 'Documents', show: docs.length > 0 },
+    { id: 'medias-supp', label: `Vidéos & Audios (${extraMediaItems.length})`, show: extraMediaItems.length > 0 },
+    { id: 'documents', label: `Documents (${docs.length})`, show: docs.length > 0 },
     { id: 'commentaires', label: `Commentaires (${culte.comments.length})`, show: true }
   ].filter((s) => s.show);
 
@@ -98,15 +112,17 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
       <BackBar backLabel="Cultes" onBack={onBack} onShare={() => onOpenShare(culte.title, culte.sermonSummary)} />
 
       <div className="page max-w-3xl py-6 sm:py-10">
-        {/* En-tête */}
         <Meta
           items={[
+            <span className="font-semibold text-church-blue">
+              {CULTE_TYPE_LABELS[inferCulteServiceType(culte)]}
+              {culte.eventLabel ? ` · ${culte.eventLabel}` : ''}
+            </span>,
             formatDate(culte.date),
-            culte.time,
-            culte.isDemo && <span className="demo-tag">Démonstration</span>
+            culte.time
           ]}
         />
-        <h1 className="mt-2 text-[2rem] leading-tight sm:text-[2.6rem]">{culte.title}</h1>
+        <h1 className="mt-2 text-[2rem] leading-tight sm:text-[2.5rem]">{culte.title}</h1>
         {culte.subtitle && <p className="mt-2 text-[17px] text-church-muted">{culte.subtitle}</p>}
 
         {(culte.preacher || culte.moderator) && (
@@ -126,47 +142,110 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
           </dl>
         )}
 
-        {/* Vidéo */}
-        <div className="-mx-4 mt-6 overflow-hidden bg-church-navy sm:mx-0 sm:rounded-lg">
-          {culte.hasVideo && culte.videoUrl && playing ? (
-            <iframe
-              title={`Vidéo — ${culte.title}`}
-              src={`${culte.videoUrl}${culte.videoUrl.includes('?') ? '&' : '?'}autoplay=1`}
-              className="aspect-video w-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
+        {/* Vidéo : Afficher ou Télécharger */}
+        <div className="mt-6 overflow-hidden rounded-2xl bg-church-navy shadow-xs">
+          {culte.hasVideo && safeVideo && playing ? (
+            isDirectVideo ? (
+              <video controls autoPlay src={safeVideo} className="aspect-video w-full bg-black object-contain" />
+            ) : (
+              <iframe
+                title={`Vidéo — ${culte.title}`}
+                src={`${safeVideo}${safeVideo.includes('?') ? '&' : '?'}autoplay=1`}
+                className="aspect-video w-full border-0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            )
           ) : (
             <div className="relative">
-              <img src={culte.coverImage} alt="" className="aspect-video w-full object-cover" />
-              {culte.hasVideo && culte.videoUrl && (
+              <img src={sanitizeUrl(culte.coverImage) || HERO_IMAGE} alt={culte.title} className="aspect-video w-full object-cover" />
+              {culte.hasVideo && safeVideo && (
                 <button
                   onClick={() => setPlaying(true)}
-                  className="absolute inset-0 flex items-center justify-center bg-church-navy/30"
-                  aria-label="Regarder la vidéo"
+                  className="absolute inset-0 flex items-center justify-center bg-church-navy/30 transition-colors hover:bg-church-navy/40"
+                  aria-label="Afficher et lire la vidéo"
                 >
-                  <span className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 font-semibold text-church-navy">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 font-semibold text-church-navy shadow-md">
                     <Play className="h-5 w-5 fill-church-navy" aria-hidden="true" />
-                    Regarder{culte.videoDuration ? ` (${culte.videoDuration})` : ''}
+                    Afficher la vidéo{culte.videoDuration ? ` (${culte.videoDuration})` : ''}
                   </span>
                 </button>
               )}
             </div>
           )}
+
+          {culte.hasVideo && safeVideo && (
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-white px-4 py-3 border-t border-church-line">
+              <span className="text-xs font-medium text-church-muted">
+                Vidéo du culte{culte.videoDuration ? ` · ${culte.videoDuration}` : ''}
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPlaying((p) => !p)}
+                  className="btn-secondary min-h-[38px] px-3 text-xs"
+                >
+                  <Eye className="h-3.5 w-3.5 text-church-blue" aria-hidden="true" />
+                  {playing ? 'Masquer la vidéo' : 'Afficher la vidéo'}
+                </button>
+                {isDirectVideo ? (
+                  <a
+                    href={buildDownloadUrl(safeVideo, `${culte.title}-video`)}
+                    download
+                    className="btn-primary min-h-[38px] px-3 text-xs"
+                  >
+                    <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                    Télécharger
+                  </a>
+                ) : (
+                  <a
+                    href={safeVideo}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-secondary min-h-[38px] px-3 text-xs"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                    Ouvrir le lien
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Audio : vrai lecteur, se charge seulement quand on appuie sur lecture */}
-        {culte.audioUrl && (
-          <div className="surface mt-4 p-4">
-            <p className="mb-2 flex items-center gap-2 font-semibold text-church-navy">
-              <Headphones className="h-5 w-5 text-church-blue" aria-hidden="true" />
-              Écouter la prédication
-              {culte.audioDuration && <span className="font-normal text-church-muted">{culte.audioDuration}</span>}
-            </p>
-            <audio controls preload="none" src={culte.audioUrl} className="w-full">
-              Votre navigateur ne lit pas l’audio.
-            </audio>
-            <p className="mt-2 text-sm text-church-muted">L’audio consomme moins de données que la vidéo.</p>
+        {/* Audio : Afficher / Écouter ou Télécharger */}
+        {safeAudio && (
+          <div className="surface mt-4 p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="flex items-center gap-2 font-semibold text-church-navy">
+                <Headphones className="h-5 w-5 text-church-blue" aria-hidden="true" />
+                Audio de la prédication
+                {culte.audioDuration && <span className="font-normal text-church-muted tabular-nums">· {culte.audioDuration}</span>}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAudio((s) => !s)}
+                  className="btn-secondary min-h-[38px] px-3 text-xs"
+                >
+                  <Eye className="h-3.5 w-3.5 text-church-blue" aria-hidden="true" />
+                  {showAudio ? 'Masquer le lecteur' : 'Afficher / Écouter'}
+                </button>
+                <a
+                  href={buildDownloadUrl(safeAudio, `${culte.title}-audio`)}
+                  download
+                  className="btn-primary min-h-[38px] px-3 text-xs"
+                >
+                  <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                  Télécharger l’audio
+                </a>
+              </div>
+            </div>
+            {showAudio && (
+              <audio controls preload="none" src={safeAudio} className="w-full">
+                Votre navigateur ne lit pas l’audio.
+              </audio>
+            )}
           </div>
         )}
 
@@ -181,15 +260,15 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
                 aria-pressed={done}
                 className={done ? 'chip-active' : 'chip'}
               >
-                {r.icon} {r.label} <span className={done ? 'text-white/80' : 'text-church-muted'}>{culte.reactions[r.type]}</span>
+                {r.icon} {r.label} <span className={done ? 'text-white/80 tabular-nums' : 'text-church-muted tabular-nums'}>{culte.reactions[r.type]}</span>
               </button>
             );
           })}
         </div>
 
-        {/* Sommaire : aller directement à une partie */}
+        {/* Sommaire */}
         {sections.length > 2 && (
-          <nav aria-label="Sommaire" className="no-scrollbar sticky top-16 z-30 -mx-4 mt-8 flex gap-2 overflow-x-auto border-b border-church-line bg-church-light px-4 py-3 sm:mx-0 sm:px-0">
+          <nav aria-label="Sommaire" className="sticky top-14 sm:top-16 z-30 mt-8 flex flex-wrap gap-2 border-b border-church-line bg-church-light/95 py-3 backdrop-blur-sm">
             {sections.map((s) => (
               <a key={s.id} href={`#${s.id}`} className="chip">
                 {s.label}
@@ -203,7 +282,7 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
           <section className="mt-8">
             <BlockTitle id="message">Le message</BlockTitle>
             {culte.scriptureRef && (
-              <figure className="rounded-lg border-l-[3px] border-church-blue bg-white p-5">
+              <figure className="surface p-5 sm:p-6">
                 <figcaption className="text-sm font-semibold text-church-blue">{culte.scriptureRef}</figcaption>
                 {culte.scripturePassage && (
                   <blockquote className="mt-2 font-serif text-lg italic leading-relaxed text-church-navy">
@@ -215,11 +294,11 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
             {culte.sermonSummary && <p className="mt-5 text-[17px] leading-relaxed">{culte.sermonSummary}</p>}
             {keyPoints.length > 0 && (
               <>
-                <h3 className="mt-6 font-sans text-base font-semibold">À retenir</h3>
-                <ol className="mt-2 space-y-3">
+                <h3 className="mt-6 font-sans text-base font-semibold">Points essentiels à retenir</h3>
+                <ol className="mt-3 space-y-3">
                   {keyPoints.map((p, i) => (
                     <li key={i} className="flex gap-3">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-church-tint text-sm font-semibold text-church-blue">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-church-tint text-sm font-semibold text-church-blue tabular-nums">
                         {i + 1}
                       </span>
                       <span className="pt-0.5">{p}</span>
@@ -235,10 +314,10 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
         {(culte.liturgy || []).length > 0 && (
           <section className="mt-10">
             <BlockTitle id="deroulement">Déroulement du culte</BlockTitle>
-            <ol className="surface divide-y divide-church-line">
+            <ol className="surface divide-y divide-church-line overflow-hidden">
               {culte.liturgy.map((step, i) => (
                 <li key={i} className="flex gap-4 p-4">
-                  <span className="w-14 shrink-0 font-semibold text-church-navy">{step.time || `${i + 1}.`}</span>
+                  <span className="w-16 shrink-0 font-semibold text-church-navy tabular-nums">{step.time || `${i + 1}.`}</span>
                   <span>
                     <span className="block font-semibold text-church-navy">{step.title}</span>
                     {step.leader && <span className="block text-sm text-church-muted">{step.leader}</span>}
@@ -254,43 +333,44 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
         {photos.length > 0 && (
           <section className="mt-10">
             <BlockTitle id="photos">Photos</BlockTitle>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {photos.map((img, i) => (
-                <button key={i} onClick={() => setLightbox(i)} className="overflow-hidden rounded-md bg-church-navy" aria-label={`Agrandir la photo ${i + 1}`}>
-                  <img src={img} alt="" className="aspect-[4/3] w-full object-cover" loading="lazy" />
-                </button>
+                <div key={i} className="group relative overflow-hidden rounded-xl border border-church-line bg-church-navy">
+                  <button
+                    type="button"
+                    onClick={() => setLightbox(i)}
+                    className="block w-full"
+                    aria-label={`Afficher la photo ${i + 1}`}
+                  >
+                    <img src={img} alt="" className="aspect-[4/3] w-full object-cover transition-transform duration-200 group-hover:scale-105" loading="lazy" />
+                  </button>
+                  <a
+                    href={buildDownloadUrl(img, `${culte.title}-photo-${i + 1}`)}
+                    download
+                    className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-lg bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-church-navy shadow-xs hover:bg-white"
+                    aria-label="Télécharger cette photo"
+                  >
+                    <Download className="h-3 w-3 text-church-blue" aria-hidden="true" />
+                    Télécharger
+                  </a>
+                </div>
               ))}
             </div>
           </section>
         )}
 
-        {/* Documents */}
-        {docs.length > 0 && (
-          <section className="mt-10">
-            <BlockTitle id="documents">Documents</BlockTitle>
-            <ul className="surface divide-y divide-church-line">
-              {docs.map((doc, i) => (
-                <li key={i} className="flex items-center gap-3 p-4">
-                  <FileText className="h-6 w-6 shrink-0 text-church-blue" aria-hidden="true" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-medium text-church-navy">{doc.title}</span>
-                    <span className="text-sm text-church-muted">
-                      {doc.type.toUpperCase()}
-                      {doc.fileSize ? `, ${doc.fileSize}` : ''}
-                    </span>
-                  </span>
-                  {isRealLink(doc.downloadUrl) ? (
-                    <a href={doc.downloadUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary px-3" download>
-                      <Download className="h-4 w-4" aria-hidden="true" />
-                      <span className="hidden sm:inline">Télécharger</span>
-                    </a>
-                  ) : (
-                    <span className="text-sm text-church-muted">Bientôt disponible</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
+        {/* Médias complémentaires & Documents : Afficher ou Télécharger */}
+        {(extraMediaItems.length > 0 || docs.length > 0) && (
+          <div id={extraMediaItems.length > 0 ? 'medias-supp' : 'documents'} className="mt-10">
+            <div id="documents">
+              <MediaViewerSection
+                title="Vidéos & Audios associés"
+                mediaItems={extraMediaItems}
+                documents={docs}
+                contextTitle={culte.title}
+              />
+            </div>
+          </div>
         )}
 
         {/* Commentaires */}
@@ -327,7 +407,7 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
             </ul>
           )}
 
-          <form onSubmit={submit} className="surface mt-5 space-y-3 p-4 sm:p-5" noValidate>
+          <form onSubmit={submit} className="surface mt-5 space-y-3 p-5" noValidate>
             <h3 className="font-sans text-base font-semibold">Laisser un commentaire</h3>
             <p className="text-sm text-church-muted">Pas besoin de compte. Votre pseudonyme sera affiché.</p>
             <input
@@ -345,7 +425,7 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
             </label>
             <label className="block">
               <span className="mb-1 block text-sm font-medium">Message</span>
-              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={800} className="field py-2.5" />
+              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={800} className="field min-h-[88px] py-2.5" />
             </label>
             <label className="block">
               <span className="mb-1 block text-sm font-medium">Vérification : combien y a-t-il d’évangiles ?</span>

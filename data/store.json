@@ -1,0 +1,268 @@
+{
+  "churchSettings": {
+    "logoUrl": null,
+    "denomination": "Église Évangélique des Assemblées de Dieu de Côte d’Ivoire",
+    "parishName": "Anyama — Annexe Ran-Extension Résidentiel",
+    "annexLabel": "Annexe de l’église d’Anyama Ran-Extension",
+    "motherChurch": "Église Évangélique des Assemblées de Dieu — Anyama Ran-Extension",
+    "principalPastor": "Pasteur Djah Douogoi Nicaise",
+    "foundationSummary": "Rattachée à l’Église Évangélique des Assemblées de Dieu de Côte d’Ivoire (EEADCI), issue du réveil pentecôtiste, implantée en Côte d’Ivoire dès 1957-1958 avec le missionnaire André Brisset, reconnue officiellement le 1er mars 1960 et unifiée sur le plan national en 1979.",
+    "city": "Anyama, District Autonome d’Abidjan, Côte d’Ivoire",
+    "address": "Quartier Ran-Extension Résidentiel, Anyama",
+    "phone": "",
+    "email": "",
+    "footerNote": "Annexe rattachée à l’Église Évangélique des Assemblées de Dieu — Anyama Ran-Extension.",
+    "announcementBanner": {
+      "enabled": false,
+      "text": "",
+      "linkPage": "evenements"
+    },
+    "schedules": [
+      {
+        "id": "sch-mardi",
+        "day": "Mardi",
+        "name": "Évangélisation et prière pour les malades",
+        "time": "18h30 - 20h00"
+      },
+      {
+        "id": "sch-jeudi",
+        "day": "Jeudi",
+        "name": "Édification",
+        "time": "18h30 - 20h00"
+      },
+      {
+        "id": "sch-dimanche",
+        "day": "Dimanche",
+        "name": "Culte de louange et d’adoration à l’Éternel",
+        "time": "07h30 - 11h00"
+      }
+    ],
+    "theme": {
+      "primaryColor": "#2854A6",
+      "navyColor": "#173567",
+      "lightBgColor": "#F4F6F9",
+      "radiusStyle": "doux"
+    },
+    "homeSections": {
+      "showQuickAccess": true,
+      "showSchedules": true,
+      "showLatestCulte": true,
+      "showEventsAndNews": true,
+      "showGallery": true,
+      "showDepartments": true
+    }
+  },
+  "heroContent": {
+    "nationalBadge": "Église Évangélique des Assemblées de Dieu de Côte d’Ivoire (EEADCI)",
+    "locationBadge": "Annexe de Ran-Extension Résidentiel · Anyama",
+    "mainTitle": "Une église unie pour adorer Dieu, grandir dans la foi et impacter Anyama.",
+    "welcomeMessage": "Bienvenue sur la plateforme officielle de l’annexe de Ran-Extension Résidentiel, rattachée à l’Église Évangélique des Assemblées de Dieu — Anyama Ran-Extension.",
+    "actionButtonCulte": "Voir les cultes",
+    "actionButtonEvents": "Agenda & Événements"
+  },
+  "siteImages": {
+    "heroImage": "",
+    "pastorImage": "",
+    "choirImage": "",
+    "youthImage": ""
+  },
+  "cultes": [],
+  "events": [],
+  "news": [],
+  "albums": [],
+  "departments": [
+    {
+      "id": "jadci",
+      "code": "JADCI",
+      "name": "JADCI",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Département de la jeunesse de l’assemblée locale d’Anyama, Ran-Extension Résidentiel.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "mifa",
+      "code": "MIFA",
+      "name": "MIFA",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Ministère des femmes de l’assemblée locale.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "ecodim",
+      "code": "ECODIM",
+      "name": "ECODIM",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "École du Dimanche pour l’enseignement biblique des enfants.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "groupe-musical",
+      "code": "GM",
+      "name": "Groupe Musical",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Équipe de louange et d’adoration musicale lors des cultes et rencontres.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "hac",
+      "code": "HAC",
+      "name": "HAC",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Groupe des hommes de l’assemblée locale.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "chorale",
+      "code": "CHORALE",
+      "name": "Chorale de l’Église",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Chorale de l’église pour les cantiques d’adoration et célébrations.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "evangelisation",
+      "code": "EVANG",
+      "name": "Comité d’Évangélisation",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Actions d’évangélisation de proximité à Anyama et ses environs.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "service-adoration",
+      "code": "SA",
+      "name": "Service d’Adoration",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Préparation spirituelle et accompagnement liturgique des cultes.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "adoration-gestuelle",
+      "code": "AG",
+      "name": "Adoration Gestuelle",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Expression chorégraphique de louange et d’adoration.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    },
+    {
+      "id": "pnpr",
+      "code": "PNPR",
+      "name": "PNPR",
+      "isNameConfirmed": true,
+      "tagline": "",
+      "description": "Département d’intercession et de prière de l’église.",
+      "leader": "",
+      "leaderRole": "",
+      "meetingSchedule": "",
+      "meetingLocation": "",
+      "activities": [],
+      "coverImage": "",
+      "galleryImages": []
+    }
+  ],
+  "admins": [],
+  "invitedAdmins": [
+    {
+      "email": "koneelise258@gmail.com",
+      "name": "Élisé Kone",
+      "role": "Administrateur Principal",
+      "status": "pending",
+      "invitedBy": "Système",
+      "invitedAt": "2026-11-21T08:38:34.027Z"
+    },
+    {
+      "email": "mikeyservice98@gmail.com",
+      "name": "Mikey Service",
+      "role": "Administrateur",
+      "status": "pending",
+      "invitedBy": "Système",
+      "invitedAt": "2026-11-21T08:38:34.027Z"
+    }
+  ],
+  "security": {
+    "secretGateSlug": "portail-eeadci",
+    "enableKeyboardShortcut": true,
+    "enableFooterTap": true,
+    "sessionTimeoutMinutes": 120
+  },
+  "securityLogs": [
+    {
+      "id": "sec-1795250354347-2a9604",
+      "timestamp": "2026-11-21T08:39:14.347Z",
+      "event": "Inscription refusée",
+      "actor": "unauthorized@example.com",
+      "detail": "Tentative d’inscription avec un e-mail non autorisé.",
+      "severity": "alert"
+    }
+  ],
+  "vapidKeys": {
+    "publicKey": "BFwWzdsPmYWOEnEYR8Ry2f476W4adJyVEsKCxasr7ViqSgFsIcTKv9N35hwdi5PKiTtmqtAoEVCd9j6gDM_rotw",
+    "privateKey": "HdctrrAErf--7R5hYbxKtJNC_6DQdfMcSeN82ee8tek"
+  },
+  "pushSubscriptions": [],
+  "pushHistory": [],
+  "driveAccounts": [],
+  "driveFolders": []
+}

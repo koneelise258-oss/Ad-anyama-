@@ -1,32 +1,55 @@
 @import "tailwindcss";
 
 /* ------------------------------------------------------------------
-   Système de design — Assemblées de Dieu d’Anyama, Ran Extension Rés.
-   Palette officielle uniquement. Pas de dégradés décoratifs, pas d’ombres.
+   Système de design — Assemblées de Dieu d’Anyama, Ran-Extension Résidentiel
+   Palette officielle avec variables personnalisables, angles adoucis et animations sobres.
    ------------------------------------------------------------------ */
+:root {
+  --church-blue: #2854A6;
+  --church-navy: #173567;
+  --church-light: #F4F6F9;
+  --church-dark: #343B46;
+  --church-white: #FFFFFF;
+  --church-line: #E1E6EE;
+  --church-muted: #5E6672;
+  --church-tint: #EAF0FA;
+
+  /* Rayons d'angles harmonisés (mode doux par défaut) */
+  --radius-card: 1.125rem;   /* 18px */
+  --radius-inner: 0.875rem;  /* 14px */
+  --radius-control: 0.75rem; /* 12px */
+}
+
 @theme {
-  --color-church-blue: #2854A6;   /* Bleu principal : actions, liens, repères */
-  --color-church-navy: #173567;   /* Bleu foncé : titres, pied de page */
-  --color-church-light: #F4F6F9;  /* Gris clair : fond de page */
-  --color-church-dark: #343B46;   /* Gris foncé : texte courant */
-  --color-church-white: #FFFFFF;
-  --color-church-line: #E1E6EE;   /* Filets et bordures */
-  --color-church-muted: #5E6672;  /* Texte secondaire (contraste AA sur blanc) */
-  --color-church-tint: #EAF0FA;   /* Fond bleuté très léger (état actif) */
+  --color-church-blue: var(--church-blue);
+  --color-church-navy: var(--church-navy);
+  --color-church-light: var(--church-light);
+  --color-church-dark: var(--church-dark);
+  --color-church-white: var(--church-white);
+  --color-church-line: var(--church-line);
+  --color-church-muted: var(--church-muted);
+  --color-church-tint: var(--church-tint);
 
   --font-sans: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
 }
 
 @layer base {
-  html { scroll-padding-top: 5rem; }
+  html {
+    scroll-padding-top: 5rem;
+    scroll-behavior: smooth;
+    overflow-x: clip;
+    max-width: 100%;
+  }
 
   body {
     font-family: var(--font-sans);
     font-size: 16px;
-    line-height: 1.6;
-    color: var(--color-church-dark);
-    background-color: var(--color-church-light);
+    line-height: 1.65;
+    color: var(--church-dark);
+    background-color: var(--church-light);
+    overflow-x: clip;
+    max-width: 100%;
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -34,21 +57,21 @@
 
   h1, h2, h3, .font-heading {
     font-family: var(--font-serif);
-    color: var(--color-church-navy);
+    color: var(--church-navy);
     font-weight: 600;
     letter-spacing: -0.01em;
-    line-height: 1.2;
+    line-height: 1.22;
     text-wrap: balance;
   }
 
   h4, h5, h6 {
     font-family: var(--font-sans);
-    color: var(--color-church-navy);
+    color: var(--church-navy);
     font-weight: 600;
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-church-blue);
+    outline: 2px solid var(--church-blue);
     outline-offset: 2px;
   }
 
@@ -62,40 +85,93 @@
 }
 
 @layer components {
-  /* Conteneur de page */
-  .page { @apply mx-auto w-full max-w-6xl px-4 sm:px-6; }
-
-  /* Boutons */
-  .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-on-dark {
-    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors;
-    min-height: 44px;
+  /* Conteneur de page optimisé mobile, tablette et ordinateur */
+  .page {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8;
   }
-  .btn-primary { @apply bg-church-blue text-white hover:bg-church-navy; }
-  .btn-secondary { @apply border border-church-line bg-white text-church-navy hover:border-church-blue; }
-  .btn-ghost { @apply px-2 text-church-blue hover:text-church-navy; }
-  .btn-on-dark { @apply border border-white/30 text-white hover:bg-white/10; }
 
-  /* Surfaces */
-  .surface { @apply rounded-lg border border-church-line bg-white; }
+  /* Boutons avec angles adoucis et transition fluide */
+  .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-on-dark {
+    @apply inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold whitespace-nowrap shrink-0;
+    border-radius: var(--radius-control);
+    min-height: 44px;
+    transition: background-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+                color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+                transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .btn:active, .btn-primary:active, .btn-secondary:active {
+    transform: scale(0.985);
+  }
+  .btn-primary {
+    @apply bg-church-blue text-white hover:bg-church-navy;
+  }
+  .btn-secondary {
+    @apply border border-church-line bg-white text-church-navy hover:border-church-blue hover:bg-church-tint/40;
+  }
+  .btn-ghost {
+    @apply px-2.5 text-church-blue hover:bg-church-tint/60 hover:text-church-navy;
+  }
+  .btn-on-dark {
+    @apply border border-white/35 bg-white/10 text-white hover:bg-white/20;
+  }
+
+  /* Surfaces douces et soignées */
+  .surface {
+    @apply border border-church-line bg-white;
+    border-radius: var(--radius-card);
+    box-shadow: 0 1px 3px rgba(23, 53, 103, 0.035);
+    transition: border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
+                transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .surface-interactive:hover {
+    border-color: color-mix(in srgb, var(--church-blue) 45%, var(--church-line));
+    box-shadow: 0 6px 18px rgba(23, 53, 103, 0.06);
+  }
 
   /* Lien de rubrique */
-  .link { @apply font-semibold text-church-blue underline-offset-4 hover:underline; }
-
-  /* Puces de filtre */
-  .chip, .chip-active {
-    @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-church-line bg-white px-3.5 text-sm font-medium text-church-dark transition-colors hover:border-church-blue;
-    min-height: 38px;
+  .link {
+    @apply font-semibold text-church-blue underline-offset-4 hover:underline;
   }
-  .chip-active { @apply border-church-navy bg-church-navy text-white hover:border-church-navy; }
 
-  /* Mention de démonstration */
-  .demo-tag { @apply inline-flex items-center rounded border border-dashed border-church-line px-1.5 py-0.5 text-[11px] font-medium text-church-muted; }
+  /* Puces de filtre interactives */
+  .chip, .chip-active {
+    @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-church-line bg-white px-4 text-sm font-medium text-church-dark transition-all duration-150 hover:border-church-blue hover:bg-church-tint/40;
+    min-height: 40px;
+  }
+  .chip-active {
+    @apply border-church-navy bg-church-navy text-white hover:border-church-navy hover:bg-church-navy;
+  }
 
-  /* Champs */
+  /* Mention discrète */
+  .demo-tag {
+    @apply inline-flex items-center rounded-full border border-dashed border-church-line px-2 py-0.5 text-[11px] font-medium text-church-muted;
+  }
+
+  /* Champs de formulaire adoucis */
   .field {
-    @apply w-full rounded-md border border-church-line bg-white px-3.5 text-[15px] text-church-dark placeholder:text-church-muted/80 focus:border-church-blue focus:outline-none;
+    @apply w-full border border-church-line bg-white px-3.5 text-[15px] text-church-dark placeholder:text-church-muted/75 focus:border-church-blue focus:outline-none transition-colors duration-150;
+    border-radius: var(--radius-control);
     min-height: 44px;
   }
+}
+
+/* Animation simple d'apparition douce */
+@keyframes softFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-soft-in {
+  animation: softFadeIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .pb-safe { padding-bottom: env(safe-area-inset-bottom); }

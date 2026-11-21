@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { NewsItem } from '../types';
+import { sanitizeUrl } from '../utils/security';
 import { Share2, ThumbsUp, MessageCircle, Image as ImageIcon } from 'lucide-react';
-import { BackBar, formatDate, Lightbox, useToast } from './ui';
+import { BackBar, formatPublishedDateTime, Lightbox, useToast } from './ui';
+import { MediaViewerSection } from './MediaViewerSection';
 
 interface NewsDetailPageProps {
   newsItem: NewsItem;
@@ -36,6 +38,8 @@ export const NewsDetailPage: React.FC<NewsDetailPageProps> = ({
   const [mathCheck, setMathCheck] = useState('');
   const [commentError, setCommentError] = useState<string | null>(null);
 
+  const safeCover = sanitizeUrl(newsItem.coverImage);
+
   const handleLike = () => {
     if (hasLiked) {
       toast.show('Vous aimez déjà cette actualité');
@@ -67,7 +71,7 @@ export const NewsDetailPage: React.FC<NewsDetailPageProps> = ({
       onAddComment(newsItem.id, authorName.trim(), commentText.trim());
       setCommentText('');
       setMathCheck('');
-      toast.show('Votre commentaire a été publié automatiquement !');
+      toast.show('Votre commentaire a été publié !');
     }
   };
 
@@ -78,16 +82,16 @@ export const NewsDetailPage: React.FC<NewsDetailPageProps> = ({
       <BackBar backLabel="Actualités" onBack={onBack} onShare={share} />
 
       <article className="page max-w-3xl py-6 sm:py-10 space-y-6">
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
           <span className={official ? 'font-semibold text-church-blue' : 'text-church-muted'}>
             {newsItem.category}
           </span>
-          <span className="text-church-muted">{formatDate(newsItem.date)}</span>
+          <span aria-hidden="true" className="text-church-line">·</span>
+          <span className="text-church-muted">Publié le {formatPublishedDateTime(newsItem.date, newsItem.publishedAt)}</span>
           {newsItem.isUrgent && <span className="font-semibold text-[#B42318]">Important</span>}
-          {newsItem.isDemo && <span className="demo-tag">Démonstration</span>}
         </p>
 
-        <h1 className="mt-2 text-[2rem] leading-tight sm:text-[2.6rem] font-serif text-church-navy">
+        <h1 className="mt-2 text-[2rem] leading-tight sm:text-[2.5rem] font-serif text-church-navy">
           {newsItem.title}
         </h1>
 
@@ -98,20 +102,20 @@ export const NewsDetailPage: React.FC<NewsDetailPageProps> = ({
           </p>
         )}
 
-        {newsItem.coverImage && (
-          <div className="relative group overflow-hidden rounded-lg bg-church-navy">
+        {safeCover && (
+          <div className="relative group overflow-hidden rounded-2xl bg-church-navy">
             <img
-              src={newsItem.coverImage}
-              alt=""
+              src={safeCover}
+              alt={newsItem.title}
               className="w-full aspect-video object-cover transition-opacity group-hover:opacity-95 cursor-pointer"
               onClick={() => setIsPhotoZoomed(true)}
             />
             <button
               onClick={() => setIsPhotoZoomed(true)}
-              className="absolute bottom-3 right-3 inline-flex items-center gap-1 rounded bg-white px-2.5 py-1 text-xs font-semibold text-church-navy shadow-xs"
+              className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-xl bg-white/95 px-3 py-1.5 text-xs font-semibold text-church-navy shadow-xs"
             >
               <ImageIcon className="h-3.5 w-3.5 text-church-blue" />
-              Agrandir la photo
+              Agrandir
             </button>
           </div>
         )}
@@ -128,24 +132,31 @@ export const NewsDetailPage: React.FC<NewsDetailPageProps> = ({
           </div>
         )}
 
-        {/* Actions : Like et Partage */}
+        <MediaViewerSection
+          title="Médias (Photos, Vidéos & Audios)"
+          videoUrl={newsItem.videoUrl}
+          audioUrl={newsItem.audioUrl}
+          mediaItems={newsItem.mediaItems}
+          documents={newsItem.documents}
+          contextTitle={newsItem.title}
+        />
+
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-church-line pt-6">
           <button
             onClick={handleLike}
             className={hasLiked ? 'btn-secondary border-church-blue text-church-blue' : 'btn-secondary'}
           >
             <ThumbsUp className={`h-4 w-4 text-church-blue ${hasLiked ? 'fill-church-blue' : ''}`} />
-            <span>J’aime ce communiqué {newsItem.likes > 0 ? `(${newsItem.likes})` : ''}</span>
+            <span>J’aime {newsItem.likes > 0 ? `(${newsItem.likes})` : ''}</span>
           </button>
 
           <button onClick={share} className="btn-secondary">
             <Share2 className="h-4 w-4 text-church-blue" aria-hidden="true" />
-            <span>Partager cette information</span>
+            <span>Partager</span>
           </button>
         </div>
 
-        {/* Section Commentaires */}
-        <section className="surface p-6 sm:p-7 space-y-6 mt-8">
+        <section className="surface p-6 space-y-6 mt-8">
           <div className="flex items-center justify-between pb-3 border-b border-church-line">
             <div className="flex items-center gap-2">
               <MessageCircle className="h-5 w-5 text-church-blue" />
@@ -153,40 +164,29 @@ export const NewsDetailPage: React.FC<NewsDetailPageProps> = ({
                 Commentaires ({commentsList.length})
               </h2>
             </div>
-            <span className="text-xs text-church-muted">Publication automatique</span>
           </div>
 
-          {/* Formulaire de commentaire */}
-          <form onSubmit={handleCommentSubmit} className="space-y-3 bg-church-light p-4 rounded-md border border-church-line">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-church-navy">
-              Ajouter un commentaire ou une question
-            </h3>
-
+          <form onSubmit={handleCommentSubmit} className="space-y-3 bg-church-light p-4 rounded-xl border border-church-line">
             {commentError && (
-              <p className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+              <p className="rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">
                 {commentError}
               </p>
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-church-muted mb-1">
-                  Votre nom / Frère ou Sœur :
-                </label>
+                <label className="block text-xs font-medium text-church-muted mb-1">Votre nom / pseudonyme</label>
                 <input
                   type="text"
                   value={authorName}
                   onChange={(e) => setAuthorName(e.target.value)}
-                  placeholder="Ex : Sœur Marie K."
                   className="field text-sm"
                   maxLength={50}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-church-muted mb-1">
-                  Vérification : Combien y a-t-il d'évangiles ?
-                </label>
+                <label className="block text-xs font-medium text-church-muted mb-1">Combien y a-t-il d’évangiles ?</label>
                 <input
                   type="text"
                   value={mathCheck}
@@ -198,53 +198,46 @@ export const NewsDetailPage: React.FC<NewsDetailPageProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-church-muted mb-1">
-                Votre message :
-              </label>
+              <label className="block text-xs font-medium text-church-muted mb-1">Votre message</label>
               <textarea
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Ex : Merci pour ce communiqué bien reçu..."
                 rows={3}
-                className="field min-h-[80px] py-2 text-sm"
+                className="field min-h-[84px] py-2 text-sm"
                 maxLength={400}
               />
             </div>
 
             <div className="flex justify-end">
               <button type="submit" className="btn-primary text-xs">
-                Publier mon commentaire
+                Publier
               </button>
             </div>
           </form>
 
-          {/* Liste des commentaires */}
           {commentsList.length > 0 ? (
             <div className="space-y-3">
               {commentsList.map((comm) => (
-                <div key={comm.id} className="surface p-4 space-y-1">
+                <div key={comm.id} className="p-4 rounded-xl bg-white border border-church-line space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-church-navy">{comm.authorName}</span>
                     <span className="text-church-muted">{comm.date}</span>
                   </div>
-                  <p className="text-sm text-church-dark leading-relaxed">
-                    {comm.text}
-                  </p>
+                  <p className="text-sm text-church-dark leading-relaxed">{comm.text}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-center py-4 text-sm text-church-muted italic">
-              Aucun commentaire pour l'instant. Laissez vos réflexions ou encouragements !
+            <p className="text-center py-2 text-sm text-church-muted italic">
+              Aucun commentaire pour l’instant.
             </p>
           )}
         </section>
       </article>
 
-      {/* Lightbox pour la photo agrandie */}
-      {isPhotoZoomed && newsItem.coverImage && (
+      {isPhotoZoomed && safeCover && (
         <Lightbox
-          items={[{ type: 'photo', url: newsItem.coverImage, caption: newsItem.title }]}
+          items={[{ type: 'photo', url: safeCover, caption: newsItem.title }]}
           index={0}
           onClose={() => setIsPhotoZoomed(false)}
           onChange={() => {}}

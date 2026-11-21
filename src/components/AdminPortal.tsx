@@ -1,3443 +1,3640 @@
 import React, { useState } from 'react';
-import { ChurchLogo } from './ChurchLogo';
-import { HERO_IMAGE, PASTOR_IMAGE } from '../mockData';
-
-/** Transforme un lien YouTube ordinaire (youtu.be, watch?v=, shorts) en lien lisible dans le site. */
-const toYoutubeEmbed = (url: string): string => {
-  const m = /(?:youtu\.be\/|v=|shorts\/|embed\/)([\w-]{11})/.exec(url);
-  return m ? `https://www.youtube-nocookie.com/embed/${m[1]}` : url;
-};
 import {
-  Culte,
-  EventItem,
-  NewsItem,
-  AlbumItem,
-  DepartmentItem,
   AdminSubPage,
-  SiteImages,
-  HeroContent
+  AdminUserPublic,
+  AdminInvitation,
+  AlbumItem,
+  ChurchSchedule,
+  ChurchSettings,
+  Culte,
+  CulteDocument,
+  CulteServiceType,
+  DepartmentItem,
+  EventItem,
+  HeroContent,
+  ItemComment,
+  LinkedDriveAccount,
+  LinkedDriveFolder,
+  MediaItem,
+  NewsItem,
+  PageView,
+  PushNotificationRecord,
+  SecurityLogEntry,
+  SecuritySettings,
+  SiteImages
 } from '../types';
+import { DEFAULT_CHURCH_SETTINGS, DEFAULT_HERO_CONTENT, DEFAULT_SITE_IMAGES, HERO_IMAGE } from '../mockData';
+import { api } from '../services/api';
+import { extractYoutubeThumbnail, sanitizeUrl, toSafeYoutubeEmbed } from '../utils/security';
+import { CULTE_TYPE_LABELS, inferCulteServiceType, sortCultesByDateDesc } from '../utils/cultes';
+import { formatPublishedDateTime } from './ui';
+import { MediaBatchUploader } from './MediaBatchUploader';
+import { GoogleDriveBrowser } from './GoogleDriveBrowser';
 import {
-  ShieldCheck,
   LayoutDashboard,
-  PlusCircle,
-  FileText,
-  Calendar,
-  Image as ImageIcon,
-  MessageCircle,
+  BookOpen,
+  CalendarDays,
+  Newspaper,
+  Images,
   Users,
+  MessageSquare,
+  Palette,
   Settings,
-  Eye,
-  Check,
-  AlertTriangle,
-  Upload,
-  ArrowRight,
-  ArrowLeft,
+  Shield,
+  Plus,
+  Pencil,
   Trash2,
-  Lock,
+  Check,
+  X,
   LogOut,
-  FolderOpen,
+  ExternalLink,
+  Download,
+  FileText,
+  AlertTriangle,
+  CheckCircle2,
+  Eye,
   Clock,
-  Sparkles,
-  ChevronRight,
-  RefreshCw,
-  Edit,
-  Tag
+  BellRing,
+  Heart,
+  MessageCircle,
+  Send,
+  HardDrive,
+  Mail,
+  UserPlus,
+  Film,
+  Headphones
 } from 'lucide-react';
 
 interface AdminPortalProps {
-  onExitAdmin: () => void;
+  currentAdmin: AdminUserPublic;
   activeSubPage: AdminSubPage;
-  onNavigateSubPage: (subPage: AdminSubPage) => void;
+  onNavigateSubPage: (sub: AdminSubPage) => void;
+  onExitAdmin: () => void;
+  onLogout: () => void;
   cultes: Culte[];
   events: EventItem[];
   news: NewsItem[];
   albums: AlbumItem[];
   departments: DepartmentItem[];
-  officialLogoUrl: string | null;
-  onUpdateLogoUrl: (url: string | null) => void;
-  siteImages: SiteImages;
-  onUpdateSiteImages: (images: SiteImages) => void;
+  churchSettings: ChurchSettings;
   heroContent: HeroContent;
-  onUpdateHeroContent: (content: HeroContent) => void;
-  onAddNewCulte: (culte: Culte) => void;
-  onUpdateCulte?: (culte: Culte) => void;
-  onAddNewNews: (item: NewsItem) => void;
-  onUpdateNews?: (news: NewsItem) => void;
-  onAddNewEvent: (event: EventItem) => void;
-  onUpdateEvent?: (event: EventItem) => void;
-  onAddNewAlbum: (album: AlbumItem) => void;
-  onUpdateAlbum?: (album: AlbumItem) => void;
-  onUpdateDepartment: (dept: DepartmentItem) => void;
-  onDeleteCulte?: (id: string) => void;
-  onDeleteEvent?: (id: string) => void;
-  onDeleteNews?: (id: string) => void;
-  onDeleteAlbum?: (id: string) => void;
-  onKeepComment?: (commentId: string, targetType: 'culte' | 'evenement' | 'actualite', targetId: string) => void;
-  onRemoveComment?: (commentId: string, targetType: 'culte' | 'evenement' | 'actualite', targetId: string) => void;
+  siteImages: SiteImages;
+  officialLogoUrl: string | null;
+  admins: AdminUserPublic[];
+  invitedAdmins: AdminInvitation[];
+  security: SecuritySettings;
+  securityLogs: SecurityLogEntry[];
+  pushSubscribersCount: number;
+  pushHistory: PushNotificationRecord[];
+  driveAccounts: LinkedDriveAccount[];
+  driveFolders: LinkedDriveFolder[];
+  onSyncPublicState: (patch: {
+    cultes?: Culte[];
+    events?: EventItem[];
+    news?: NewsItem[];
+    albums?: AlbumItem[];
+    departments?: DepartmentItem[];
+    churchSettings?: ChurchSettings;
+    heroContent?: HeroContent;
+    siteImages?: SiteImages;
+    officialLogoUrl?: string | null;
+  }) => void;
+  onSyncSecurityState: (patch: {
+    admins?: AdminUserPublic[];
+    invitedAdmins?: AdminInvitation[];
+    security?: SecuritySettings;
+    securityLogs?: SecurityLogEntry[];
+  }) => void;
+  onSyncPushState: (patch: {
+    pushSubscribersCount?: number;
+    pushHistory?: PushNotificationRecord[];
+  }) => void;
+  onSyncDriveState: (patch: {
+    driveAccounts?: LinkedDriveAccount[];
+    driveFolders?: LinkedDriveFolder[];
+    albums?: AlbumItem[];
+  }) => void;
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
-  onExitAdmin,
+  currentAdmin,
   activeSubPage,
   onNavigateSubPage,
+  onExitAdmin,
+  onLogout,
   cultes,
   events,
   news,
   albums,
   departments,
-  officialLogoUrl,
-  onUpdateLogoUrl,
-  siteImages,
-  onUpdateSiteImages,
+  churchSettings,
   heroContent,
-  onUpdateHeroContent,
-  onAddNewCulte,
-  onUpdateCulte,
-  onAddNewNews,
-  onUpdateNews,
-  onAddNewEvent,
-  onUpdateEvent,
-  onAddNewAlbum,
-  onUpdateAlbum,
-  onUpdateDepartment,
-  onDeleteCulte,
-  onDeleteEvent,
-  onDeleteNews,
-  onDeleteAlbum,
-  onKeepComment,
-  onRemoveComment
+  siteImages,
+  officialLogoUrl,
+  admins,
+  invitedAdmins,
+  security,
+  securityLogs,
+  pushSubscribersCount,
+  pushHistory,
+  driveAccounts,
+  driveFolders,
+  onSyncPublicState,
+  onSyncSecurityState,
+  onSyncPushState,
+  onSyncDriveState
 }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
-  const [adminUser] = useState<string>('Responsable Communication (Anyama)');
-  const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [pushTitle, setPushTitle] = useState('Assemblées de Dieu d’Anyama');
+  const [pushBody, setPushBody] = useState('');
+  const [pushTarget, setPushTarget] = useState('/');
+  const [sendingPush, setSendingPush] = useState(false);
+  const [culteCategoryFilter, setCulteCategoryFilter] = useState<'tous' | CulteServiceType>('tous');
+  const [showCulteDrivePicker, setShowCulteDrivePicker] = useState(false);
+  const [showEventDrivePicker, setShowEventDrivePicker] = useState(false);
+  const [showNewsDrivePicker, setShowNewsDrivePicker] = useState(false);
+  const [showAlbumDrivePicker, setShowAlbumDrivePicker] = useState(false);
 
-  // Editing state for already published entities (full rectification)
-  const [editingCulte, setEditingCulte] = useState<Culte | null>(null);
-  const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
-  const [editingNews, setEditingNews] = useState<NewsItem | null>(null);
-  const [editingAlbum, setEditingAlbum] = useState<AlbumItem | null>(null);
-
-  // Editable copies for Site Images & Hero Copy
-  const [heroForm, setHeroForm] = useState<HeroContent>(heroContent);
-  const [imagesForm, setImagesForm] = useState<SiteImages>(siteImages);
-
-  // 5-Step Guided Service Creation State
-  const [wizardStep, setWizardStep] = useState<number>(1);
-  const [isFullFormView, setIsFullFormView] = useState<boolean>(false);
-
-  // Form State for new service (preserved between steps and full-view toggle)
-  const EMPTY_SERVICE_FORM = {
-    title: '',
-    subtitle: '',
-    date: new Date().toISOString().slice(0, 10),
-    time: '',
-    preacher: '',
-    preacherRole: '',
-    moderator: '',
-    scriptureRef: '',
-    scripturePassage: '',
-    sermonSummary: '',
-    keyPoints: [] as string[],
-    liturgySteps: [] as { time: string; title: string; leader: string }[],
-    coverImage: PASTOR_IMAGE,
-    videoUrl: '',
-    hasVideo: false,
-    status: 'publie' as 'publie' | 'programme' | 'brouillon',
-    scheduledDate: ''
-  };
-  const [serviceForm, setServiceForm] = useState(EMPTY_SERVICE_FORM);
-
-  // Event creation form state (with poster image import)
-  const [eventForm, setEventForm] = useState({
-    title: '',
-    category: 'Prière' as EventItem['category'],
-    date: '',
-    time: '',
-    location: 'Grand Temple des Assemblées de Dieu, Anyama',
-    speaker: '',
-    description: '',
-    coverImage: HERO_IMAGE
-  });
-
-  // News creation form state (with illustration photo import)
-  const [newsForm, setNewsForm] = useState({
-    title: '',
-    category: 'Communiqué officiel' as NewsItem['category'],
-    date: new Date().toISOString().slice(0, 10),
-    author: 'Secrétariat Général de l’Église',
-    authorRole: 'Bureau du Conseil Pastoral',
-    summary: '',
-    fullContent: '',
-    coverImage: HERO_IMAGE,
-    isUrgent: false
-  });
-
-  // Album creation form state
-  const [albumForm, setAlbumForm] = useState({
-    title: '',
-    category: 'Cultes' as AlbumItem['category'],
-    type: 'photo' as AlbumItem['type'],
-    date: new Date().toISOString().slice(0, 10),
-    coverImage: HERO_IMAGE,
-    description: ''
-  });
-
-  // Department quick edit state
-  const [editingDept, setEditingDept] = useState<DepartmentItem | null>(null);
-
-  // Logo upload preview state
-  const [logoPreview, setLogoPreview] = useState<string | null>(officialLogoUrl);
-
-  const [simulatedFiles, setSimulatedFiles] = useState<string[]>([
-    'IMG_Culte_Sanctuaire_01.jpg',
-    'IMG_Culte_Chorale_Praise_02.jpg',
-    'IMG_Culte_Orateur_Pulpit_03.jpg'
-  ]);
-
-  const [commentsModerationList, setCommentsModerationList] = useState([
-    {
-      id: 'm-1',
-      culteTitle: 'Demeurer inébranlable dans la foi',
-      author: 'Frère Marc A.',
-      text: 'Ce message sur Philippiens 4 m’a profondément relevé cette semaine. Gloire à Jésus pour notre église à Anyama !',
-      date: 'Il y a 1 jour',
-      status: 'approuve',
-      isReported: false
-    },
-    {
-      id: 'm-2',
-      culteTitle: 'La puissance de la prière d’intercession',
-      author: 'Visiteur_94',
-      text: 'Message contenant un lien commercial non vérifié vers un service externe.',
-      date: 'Il y a 3 heures',
-      status: 'en_attente',
-      isReported: true
-    }
-  ]);
-
-  const showNotification = (msg: string) => {
-    setFeedbackNotice(msg);
-    setTimeout(() => setFeedbackNotice(null), 3500);
+  const notify = (msg: string, type: 'ok' | 'err' = 'ok') => {
+    setToast({ type, msg });
+    window.setTimeout(() => {
+      setToast((prev) => (prev?.msg === msg ? null : prev));
+    }, 4500);
   };
 
-  // Login screen if unauthenticated
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-[80vh] flex items-center justify-center p-4">
-        <div className="w-full max-w-lg bg-white rounded-2xl p-6 sm:p-8 shadow-xl border border-slate-200 space-y-6">
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-xl bg-[#173567] text-white flex items-center justify-center mx-auto shadow-xs">
-              <Lock className="w-6 h-6" />
-            </div>
-            <span className="text-[10px] uppercase font-bold tracking-wider text-[#2854A6] block">
-              Église Évangélique des Assemblées de Dieu de Côte d’Ivoire
-            </span>
-            <h2 className="font-heading font-bold text-lg sm:text-xl text-[#173567]">
-              Administration — Anyama, Ran-Extension Résidentiel
-            </h2>
-            <p className="text-xs text-[#343B46]/70">
-              Plateforme officielle de communication de l’assemblée locale
-            </p>
-          </div>
+  // ==================== ETATS FORMULAIRES ====================
 
-          {/* Bannière explicative d'accès temporaire pour les tests */}
-          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
-            <div className="flex items-center gap-2 font-bold text-amber-950">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Accès administrateur temporaire (Mode Test & Validation)</span>
-            </div>
-            <p className="text-[11px] leading-relaxed text-amber-800">
-              Cet accès est configuré pour tester l'ensemble des pages et fonctionnalités (création, modification et suppression). Les données sont enregistrées localement dans votre navigateur.
-            </p>
-            <div className="pt-2 border-t border-amber-200/80 flex flex-col gap-1 text-[11px] bg-white/70 p-2.5 rounded-lg border">
-              <div>Identifiant test : <strong className="text-church-navy">admin.test@ad-anyama.ci</strong></div>
-              <div>Mot de passe test : <strong className="text-church-navy">anyama-test-2026</strong></div>
-            </div>
-          </div>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setIsAuthenticated(true);
-              showNotification('Connexion réussie à l’espace administrateur temporaire.');
-            }}
-            className="space-y-4"
-          >
-            <div>
-              <label className="block text-xs font-semibold text-[#343B46] mb-1">
-                Identifiant Administrateur
-              </label>
-              <input
-                type="text"
-                defaultValue="admin.test@ad-anyama.ci"
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2854A6]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[#343B46] mb-1">
-                Mot de passe
-              </label>
-              <input
-                type="password"
-                defaultValue="anyama-test-2026"
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2854A6]"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-2.5 rounded-xl bg-[#2854A6] hover:bg-[#1f4489] text-white font-semibold text-xs transition-colors shadow-xs"
-            >
-              Se connecter au tableau de bord
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsAuthenticated(true);
-                showNotification('Connexion avec identifiants de test.');
-              }}
-              className="w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#173567] font-semibold text-xs transition-colors border border-slate-200 flex items-center justify-center gap-1.5"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-[#2854A6]" />
-              <span>1-Clic : Utiliser les identifiants de test</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onExitAdmin}
-              className="w-full py-2 text-xs text-[#343B46]/70 hover:text-[#173567]"
-            >
-              Retour au site public
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  // Handle service publishing
-  const handlePublishCulte = () => {
-    if (!serviceForm.title.trim() || !serviceForm.date) {
-      showNotification('Indiquez au moins le titre et la date du culte (étape 1).');
-      setWizardStep(1);
-      return;
-    }
-    const keyPoints = (serviceForm.keyPoints || []).filter((k) => k.trim());
-    const newCulte: Culte = {
+  // --- Cultes ---
+  const emptyCulteForm = (): Culte => {
+    const today = new Date().toISOString().slice(0, 10);
+    return {
       id: `culte-${Date.now()}`,
-      title: serviceForm.title.trim(),
-      subtitle: serviceForm.subtitle,
-      date: serviceForm.date,
-      time: serviceForm.time,
-      preacher: serviceForm.preacher,
-      preacherRole: serviceForm.preacherRole,
-      moderator: serviceForm.moderator,
-      scriptureRef: serviceForm.scriptureRef,
-      scripturePassage: serviceForm.scripturePassage,
-      sermonSummary: serviceForm.sermonSummary,
-      keyPoints,
-      liturgy: serviceForm.liturgySteps.filter((l) => l.title.trim()),
-      coverImage: serviceForm.coverImage,
-      photos: serviceForm.coverImage ? [serviceForm.coverImage] : [],
-      videoUrl: serviceForm.videoUrl || undefined,
-      hasVideo: !!serviceForm.videoUrl,
+      title: '',
+      subtitle: '',
+      date: today,
+      publishedAt: '',
+      scheduledDate: '',
+      time: '07h30 - 11h00',
+      serviceType: inferCulteServiceType({ date: today, title: '' }),
+      eventLabel: '',
+      preacher: '',
+      preacherRole: '',
+      moderator: '',
+      scriptureRef: '',
+      scripturePassage: '',
+      sermonSummary: '',
+      keyPoints: [],
+      liturgy: [],
+      coverImage: siteImages.pastorImage || '',
+      photos: [],
+      videoUrl: '',
+      videoDuration: '',
+      hasVideo: false,
+      audioUrl: '',
+      audioDuration: '',
+      mediaItems: [],
       documents: [],
       reactions: { likes: 0, hearts: 0, prayers: 0 },
       comments: [],
-      status: serviceForm.status
+      status: 'publie'
     };
-
-    onAddNewCulte(newCulte);
-    showNotification(`Le culte « ${newCulte.title} » a été ${serviceForm.status === 'publie' ? 'publié sur le site' : serviceForm.status === 'programme' ? 'programmé' : 'enregistré en brouillon'}.`);
-    setServiceForm(EMPTY_SERVICE_FORM);
-    setWizardStep(1);
-    onNavigateSubPage('cultes');
   };
+  const [editingCulte, setEditingCulte] = useState<Culte | null>(null);
+  const [culteKeyPointsText, setCulteKeyPointsText] = useState('');
 
-  // Generic image upload helper for posters, photos, and site assets
-  const handleImageFileUpload = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    onSuccess: (base64Url: string) => void
-  ) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (reader.result) {
-          onSuccess(reader.result as string);
+  const openCulteForm = (existing?: Culte) => {
+    const base = existing
+      ? {
+          ...existing,
+          serviceType: existing.serviceType || inferCulteServiceType(existing),
+          mediaItems: [...(existing.mediaItems || [])],
+          documents: [...(existing.documents || [])]
         }
+      : emptyCulteForm();
+    setEditingCulte(base);
+    setCulteKeyPointsText((base.keyPoints || []).join('\n'));
+    setShowCulteDrivePicker(false);
+    onNavigateSubPage('cultes-creer');
+  };
+
+  const handleSaveCulte = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCulte || !editingCulte.title.trim()) {
+      notify('Le titre du culte est requis.', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      const cleanedVideo = editingCulte.videoUrl?.trim() ? toSafeYoutubeEmbed(editingCulte.videoUrl) : '';
+      const autoThumb =
+        !editingCulte.coverImage && editingCulte.videoUrl
+          ? extractYoutubeThumbnail(editingCulte.videoUrl) || ''
+          : editingCulte.coverImage;
+      const serviceType = editingCulte.serviceType || inferCulteServiceType(editingCulte);
+      const payload: Culte = {
+        ...editingCulte,
+        serviceType,
+        eventLabel: serviceType === 'evenement' ? (editingCulte.eventLabel || '').trim() : '',
+        publishedAt: editingCulte.publishedAt || new Date().toISOString(),
+        coverImage: autoThumb,
+        videoUrl: cleanedVideo,
+        hasVideo: Boolean(cleanedVideo),
+        keyPoints: culteKeyPointsText
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
       };
-      reader.readAsDataURL(file);
+      const exists = cultes.some((c) => c.id === payload.id);
+      const res = exists ? await api.updateCulte(payload) : await api.createCulte(payload);
+      onSyncPublicState({ cultes: res.cultes });
+      setEditingCulte(null);
+      onNavigateSubPage('cultes');
+      notify(exists ? 'Culte mis à jour.' : 'Culte enregistré.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur d’enregistrement.', 'err');
+    } finally {
+      setSaving(false);
     }
   };
 
-  // Handle event publishing
-  const handlePublishEvent = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!eventForm.title.trim()) return;
+  // --- Événements ---
+  const emptyEventForm = (): EventItem => ({
+    id: `evt-${Date.now()}`,
+    title: '',
+    category: 'Culte spécial',
+    date: new Date().toISOString().slice(0, 10),
+    time: '',
+    location: churchSettings.address || 'Ran-Extension Résidentiel, Anyama',
+    description: '',
+    speaker: '',
+    coverImage: '',
+    videoUrl: '',
+    audioUrl: '',
+    mediaItems: [],
+    documents: [],
+    attendeesCount: 0,
+    likes: 0,
+    comments: []
+  });
+  const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
+  const [eventPollEnabled, setEventPollEnabled] = useState(false);
+  const [eventPollQuestion, setEventPollQuestion] = useState('Serez-vous présent(e) à ce rendez-vous ?');
+  const [eventPollOptionsText, setEventPollOptionsText] = useState('Oui, je serai présent(e)\nPeut-être\nEn prière avec vous');
 
-    const newEv: EventItem = {
-      id: `ev-${Date.now()}`,
-      title: eventForm.title,
-      category: eventForm.category,
-      date: eventForm.date,
-      time: eventForm.time,
-      location: eventForm.location,
-      speaker: eventForm.speaker,
-      description: eventForm.description,
-      coverImage: eventForm.coverImage,
-      attendeesCount: 0,
-      isRegistered: false,
-      likes: 0,
-      comments: [],
-      poll: {
-        question: 'Serez-vous présent(e) à ce rassemblement ?',
-        options: [
-          { id: 'yes', label: 'Oui, je serai présent(e) au temple', votes: 1 },
-          { id: 'online', label: 'Je suivrai en prière / en ligne', votes: 0 },
-          { id: 'no', label: 'Malheureusement indisponible', votes: 0 }
-        ],
-        totalVotes: 1
+  const openEventForm = (existing?: EventItem) => {
+    const base = existing
+      ? {
+          ...existing,
+          videoUrl: existing.videoUrl || '',
+          audioUrl: existing.audioUrl || '',
+          mediaItems: [...(existing.mediaItems || [])],
+          documents: [...(existing.documents || [])]
+        }
+      : emptyEventForm();
+    setEditingEvent(base);
+    setShowEventDrivePicker(false);
+    if (base.poll) {
+      setEventPollEnabled(true);
+      setEventPollQuestion(base.poll.question);
+      setEventPollOptionsText(base.poll.options.map((o) => o.label).join('\n'));
+    } else {
+      setEventPollEnabled(false);
+      setEventPollQuestion('Serez-vous présent(e) à ce rendez-vous ?');
+      setEventPollOptionsText('Oui, je serai présent(e)\nPeut-être\nEn prière avec vous');
+    }
+    onNavigateSubPage('evenements-creer');
+  };
+
+  const handleSaveEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEvent || !editingEvent.title.trim()) {
+      notify('Le titre de l’événement est requis.', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      let poll = editingEvent.poll;
+      if (eventPollEnabled) {
+        const labels = eventPollOptionsText
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const existingOpts = editingEvent.poll?.options || [];
+        const options = labels.map((label, idx) => ({
+          id: existingOpts[idx]?.id || `opt-${idx + 1}`,
+          label,
+          votes: existingOpts[idx]?.label === label ? existingOpts[idx].votes : 0
+        }));
+        poll = {
+          question: eventPollQuestion.trim() || 'Serez-vous présent(e) ?',
+          options,
+          totalVotes: options.reduce((acc, o) => acc + o.votes, 0)
+        };
+      } else {
+        poll = undefined;
       }
-    };
 
-    onAddNewEvent(newEv);
-    showNotification(`L'événement « ${eventForm.title} » a été ajouté à l'agenda.`);
-    onNavigateSubPage('evenements');
-  };
-
-  // Handle news publishing
-  const handlePublishNews = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newsForm.title.trim()) return;
-
-    const newN: NewsItem = {
-      id: `news-${Date.now()}`,
-      title: newsForm.title,
-      category: newsForm.category,
-      date: newsForm.date,
-      author: newsForm.author,
-      authorRole: newsForm.authorRole,
-      summary: newsForm.summary,
-      fullContent: newsForm.fullContent,
-      coverImage: newsForm.coverImage,
-      isUrgent: newsForm.isUrgent,
-      readsCount: 0,
-      likes: 0,
-      comments: []
-    };
-
-    onAddNewNews(newN);
-    showNotification(`Le communiqué « ${newsForm.title} » a été publié.`);
-    onNavigateSubPage('actualites');
-  };
-
-  // Handle logo file import from phone / PC
-  const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        setLogoPreview(result);
+      const cleanedVideo = editingEvent.videoUrl?.trim() ? toSafeYoutubeEmbed(editingEvent.videoUrl) : '';
+      const cleanedAudio = editingEvent.audioUrl?.trim() ? sanitizeUrl(editingEvent.audioUrl, false) : '';
+      const payload: EventItem = {
+        ...editingEvent,
+        videoUrl: cleanedVideo,
+        audioUrl: cleanedAudio,
+        poll
       };
-      reader.readAsDataURL(file);
+      const exists = events.some((ev) => ev.id === payload.id);
+      const res = exists ? await api.updateEvent(payload) : await api.createEvent(payload);
+      onSyncPublicState({ events: res.events });
+      setEditingEvent(null);
+      onNavigateSubPage('evenements');
+      notify(exists ? 'Événement modifié.' : 'Événement publié.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur d’enregistrement.', 'err');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleSaveOfficialLogo = () => {
-    onUpdateLogoUrl(logoPreview);
-    showNotification('Le logo officiel a été enregistré et appliqué sur l’ensemble du site.');
+  // --- Actualités ---
+  const emptyNewsForm = (): NewsItem => ({
+    id: `news-${Date.now()}`,
+    title: '',
+    category: 'Communiqué officiel',
+    date: new Date().toISOString().slice(0, 10),
+    publishedAt: '',
+    author: currentAdmin.name,
+    authorRole: currentAdmin.role,
+    summary: '',
+    fullContent: '',
+    coverImage: '',
+    videoUrl: '',
+    audioUrl: '',
+    mediaItems: [],
+    documents: [],
+    isUrgent: false,
+    readsCount: 0,
+    likes: 0,
+    comments: []
+  });
+  const [editingNews, setEditingNews] = useState<NewsItem | null>(null);
+
+  const openNewsForm = (existing?: NewsItem) => {
+    setEditingNews(
+      existing
+        ? {
+            ...existing,
+            videoUrl: existing.videoUrl || '',
+            audioUrl: existing.audioUrl || '',
+            mediaItems: [...(existing.mediaItems || [])],
+            documents: [...(existing.documents || [])]
+          }
+        : emptyNewsForm()
+    );
+    setShowNewsDrivePicker(false);
+    onNavigateSubPage('actualites-creer');
   };
 
-  const handleResetToProvisionalLogo = () => {
-    setLogoPreview(null);
-    onUpdateLogoUrl(null);
-    showNotification('Rétablissement du logo provisoire par défaut.');
+  const handleSaveNews = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNews || !editingNews.title.trim()) {
+      notify('Le titre de l’actualité est requis.', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      const exists = news.some((n) => n.id === editingNews.id);
+      const nowIso = new Date().toISOString();
+      const cleanedVideo = editingNews.videoUrl?.trim() ? toSafeYoutubeEmbed(editingNews.videoUrl) : '';
+      const cleanedAudio = editingNews.audioUrl?.trim() ? sanitizeUrl(editingNews.audioUrl, false) : '';
+      const payload: NewsItem = exists
+        ? {
+            ...editingNews,
+            videoUrl: cleanedVideo,
+            audioUrl: cleanedAudio,
+            publishedAt: editingNews.publishedAt || nowIso
+          }
+        : {
+            ...editingNews,
+            videoUrl: cleanedVideo,
+            audioUrl: cleanedAudio,
+            date: nowIso.slice(0, 10),
+            publishedAt: nowIso
+          };
+      const res = exists ? await api.updateNews(payload) : await api.createNews(payload);
+      onSyncPublicState({ news: res.news });
+      setEditingNews(null);
+      onNavigateSubPage('actualites');
+      notify(exists ? 'Actualité mise à jour.' : 'Actualité publiée avec date et heure automatiques.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur d’enregistrement.', 'err');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  // --- Galerie ---
+  const emptyAlbumForm = (): AlbumItem => ({
+    id: `alb-${Date.now()}`,
+    title: '',
+    category: 'Cultes',
+    type: 'photo',
+    date: new Date().toISOString().slice(0, 10),
+    coverImage: '',
+    mediaCount: 0,
+    items: [],
+    description: ''
+  });
+  const [editingAlbum, setEditingAlbum] = useState<AlbumItem | null>(null);
+  const [videoItemUrl, setVideoItemUrl] = useState('');
+  const [videoItemCaption, setVideoItemCaption] = useState('');
+
+  const openAlbumForm = (existing?: AlbumItem) => {
+    setEditingAlbum(existing ? { ...existing, items: [...(existing.items || [])] } : emptyAlbumForm());
+    setVideoItemUrl('');
+    setVideoItemCaption('');
+    setShowAlbumDrivePicker(false);
+    onNavigateSubPage('galerie-creer');
+  };
+
+  const handleSaveAlbum = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAlbum || !editingAlbum.title.trim()) {
+      notify('Le titre de l’album est requis.', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: AlbumItem = {
+        ...editingAlbum,
+        coverImage: editingAlbum.coverImage || editingAlbum.items[0]?.url || '',
+        mediaCount: editingAlbum.items.length
+      };
+      const exists = albums.some((a) => a.id === payload.id);
+      const res = exists ? await api.updateAlbum(payload) : await api.createAlbum(payload);
+      onSyncPublicState({ albums: res.albums });
+      setEditingAlbum(null);
+      onNavigateSubPage('galerie');
+      notify(exists ? 'Album mis à jour.' : 'Album publié.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur d’enregistrement.', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // --- Départements ---
+  const emptyDepartmentForm = (): DepartmentItem => ({
+    id: `dept-${Date.now()}`,
+    code: '',
+    name: '',
+    isNameConfirmed: true,
+    tagline: '',
+    description: '',
+    leader: '',
+    leaderRole: '',
+    meetingSchedule: '',
+    meetingLocation: '',
+    activities: [],
+    coverImage: '',
+    galleryImages: [],
+    documents: [],
+    contactPhone: '',
+    contactEmail: ''
+  });
+  const [editingDept, setEditingDept] = useState<DepartmentItem | null>(null);
+  const [deptActivitiesText, setDeptActivitiesText] = useState('');
+
+  const handleSelectDeptEdit = (d: DepartmentItem) => {
+    setEditingDept({ ...d, galleryImages: [...(d.galleryImages || [])], documents: [...(d.documents || [])] });
+    setDeptActivitiesText((d.activities || []).join('\n'));
+  };
+
+  const handleSaveDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDept || !editingDept.name.trim()) {
+      notify('Le nom du département est requis.', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: DepartmentItem = {
+        ...editingDept,
+        code: editingDept.code.trim() || editingDept.name.slice(0, 6).toUpperCase(),
+        activities: deptActivitiesText
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+      };
+      const exists = departments.some((d) => d.id === payload.id);
+      const res = exists ? await api.updateDepartment(payload) : await api.createDepartment(payload);
+      onSyncPublicState({ departments: res.departments });
+      setEditingDept(null);
+      notify(exists ? 'Département mis à jour.' : 'Nouveau département ajouté.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur d’enregistrement.', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // --- Commentaires unifiés ---
+  const [commentFilter, setCommentFilter] = useState<'tous' | 'signales' | 'auto-publie' | 'approuve'>('tous');
+
+  const allComments: ItemComment[] = [
+    ...cultes.flatMap((c) => (c.comments || []).map((cm) => ({ ...cm, targetType: 'culte' as const, targetId: c.id, targetTitle: c.title }))),
+    ...events.flatMap((e) => (e.comments || []).map((cm) => ({ ...cm, targetType: 'evenement' as const, targetId: e.id, targetTitle: e.title }))),
+    ...news.flatMap((n) => (n.comments || []).map((cm) => ({ ...cm, targetType: 'actualite' as const, targetId: n.id, targetTitle: n.title })))
+  ];
+
+  const filteredComments = allComments.filter((cm) => {
+    if (commentFilter === 'signales') return Boolean(cm.reported);
+    if (commentFilter === 'auto-publie') return cm.status === 'auto-publie';
+    if (commentFilter === 'approuve') return cm.status === 'approuve';
+    return true;
+  });
+
+  // --- Médias / Hero / Bannière ---
+  const [heroDraft, setHeroDraft] = useState<HeroContent>(heroContent);
+  const [imagesDraft, setImagesDraft] = useState<SiteImages>(siteImages);
+  const [logoDraft, setLogoDraft] = useState<string | null>(officialLogoUrl);
+  const [bannerDraft, setBannerDraft] = useState(
+    churchSettings.announcementBanner || { enabled: false, text: '', linkPage: 'evenements' as PageView }
+  );
+
+  const handleSaveMediaAndHero = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await api.updateSettings({
+        heroContent: heroDraft,
+        siteImages: imagesDraft,
+        officialLogoUrl: logoDraft,
+        churchSettings: {
+          ...churchSettings,
+          announcementBanner: bannerDraft
+        }
+      });
+      onSyncPublicState({
+        heroContent: res.heroContent,
+        siteImages: res.siteImages,
+        officialLogoUrl: res.officialLogoUrl,
+        churchSettings: res.churchSettings
+      });
+      notify('Textes d’accueil, bannière et médias enregistrés.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur de sauvegarde.', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // --- Personnalisation & Paramètres ---
+  const [settingsDraft, setSettingsDraft] = useState<ChurchSettings>({
+    ...DEFAULT_CHURCH_SETTINGS,
+    ...churchSettings,
+    theme: churchSettings.theme || DEFAULT_CHURCH_SETTINGS.theme,
+    homeSections: churchSettings.homeSections || DEFAULT_CHURCH_SETTINGS.homeSections,
+    schedules: churchSettings.schedules || DEFAULT_CHURCH_SETTINGS.schedules
+  });
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await api.updateSettings({ churchSettings: settingsDraft });
+      onSyncPublicState({ churchSettings: res.churchSettings });
+      notify('Apparence, horaires et coordonnées enregistrés.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur de sauvegarde.', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addScheduleRow = () => {
+    setSettingsDraft((prev) => ({
+      ...prev,
+      schedules: [...(prev.schedules || []), { id: `sch-${Date.now()}`, day: 'Mercredi', name: '', time: '' }]
+    }));
+  };
+
+  const updateScheduleRow = (idx: number, field: keyof ChurchSchedule, value: string) => {
+    setSettingsDraft((prev) => ({
+      ...prev,
+      schedules: prev.schedules.map((s, i) => (i === idx ? { ...s, [field]: value } : s))
+    }));
+  };
+
+  const removeScheduleRow = (idx: number) => {
+    setSettingsDraft((prev) => ({
+      ...prev,
+      schedules: prev.schedules.filter((_, i) => i !== idx)
+    }));
+  };
+
+  // --- Cybersécurité & Liste blanche Google ---
+  const [secDraft, setSecDraft] = useState<SecuritySettings>(security);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteRole, setInviteRole] = useState('Administrateur');
+  const [lastDispatchInfo, setLastDispatchInfo] = useState<{
+    email: string;
+    mailtoUrl: string;
+    emailSent: boolean;
+  } | null>(null);
+
+  const handleSaveSecurity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!/^[a-z0-9_-]{4,60}$/i.test(secDraft.secretGateSlug.trim())) {
+      notify('Le chemin caché doit contenir 4 à 60 caractères alphanumériques (- ou _).', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await api.updateSecurity(secDraft);
+      onSyncSecurityState({ security: res.security, securityLogs: res.securityLogs });
+      notify('Paramètres de cybersécurité mis à jour.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur sécurité.', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleInviteAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) {
+      notify('Veuillez saisir une adresse Google valide.', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await api.inviteAdmin({
+        email: inviteEmail.trim(),
+        name: inviteName.trim() || inviteEmail.trim().split('@')[0],
+        role: inviteRole.trim() || 'Administrateur'
+      });
+      onSyncSecurityState({
+        admins: res.admins,
+        invitedAdmins: res.invitedAdmins,
+        securityLogs: res.securityLogs
+      });
+      if (res.mailtoUrl) {
+        setLastDispatchInfo({
+          email: inviteEmail.trim(),
+          mailtoUrl: res.mailtoUrl,
+          emailSent: res.emailSent
+        });
+      }
+      setInviteEmail('');
+      setInviteName('');
+      notify(
+        res.emailSent
+          ? 'E-mail autorisé et notification envoyée. La personne peut se connecter via « Continuer avec Google ».'
+          : 'Adresse Google autorisée ! Elle peut maintenant cliquer sur « Continuer avec Google » pour entrer.'
+      );
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Erreur lors de l’ajout.', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSendResetEmailToInvite = async (email: string) => {
+    setSaving(true);
+    try {
+      const res = await api.sendAdminResetEmail(email);
+      onSyncSecurityState({
+        invitedAdmins: res.invitedAdmins,
+        securityLogs: res.securityLogs
+      });
+      setLastDispatchInfo({
+        email,
+        mailtoUrl: res.mailtoUrl,
+        emailSent: res.emailSent
+      });
+      notify(
+        res.emailSent
+          ? `E-mail d’accès envoyé à ${email}.`
+          : `Lien d’accès prêt pour ${email}.`
+      );
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Impossible d’envoyer la notification.', 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    try {
+      const res = await fetch(api.downloadBackupUrl(), { credentials: 'include' });
+      if (!res.ok) throw new Error('Téléchargement refusé.');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sauvegarde-ad-anyama-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify('Sauvegarde téléchargée.');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Échec du téléchargement.', 'err');
+    }
+  };
+
+  // ==================== MENU LATÉRAL ====================
+  const menuItems: Array<{ id: AdminSubPage; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }> = [
+    { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
+    { id: 'cultes', label: 'Cultes & Prédications', icon: BookOpen, badge: cultes.length },
+    { id: 'evenements', label: 'Événements & Affiches', icon: CalendarDays, badge: events.length },
+    { id: 'actualites', label: 'Actualités', icon: Newspaper, badge: news.length },
+    { id: 'galerie', label: 'Galerie & Lots photos', icon: Images, badge: albums.length },
+    { id: 'drive', label: 'Google Drive (Photos)', icon: HardDrive, badge: driveAccounts.length || undefined },
+    { id: 'departements', label: 'Départements', icon: Users, badge: departments.length },
+    {
+      id: 'commentaires',
+      label: 'Commentaires',
+      icon: MessageSquare,
+      badge: allComments.filter((c) => c.reported).length || undefined
+    },
+    { id: 'medias', label: 'Accueil, Logo & Bannière', icon: Palette },
+    { id: 'parametres', label: 'Apparence & Horaires', icon: Settings },
+    { id: 'securite', label: 'Cybersécurité & Accès', icon: Shield }
+  ];
+
+  const isMenuActive = (id: AdminSubPage) =>
+    activeSubPage === id ||
+    (id === 'cultes' && activeSubPage === 'cultes-creer') ||
+    (id === 'evenements' && activeSubPage === 'evenements-creer') ||
+    (id === 'actualites' && activeSubPage === 'actualites-creer') ||
+    (id === 'galerie' && activeSubPage === 'galerie-creer');
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 pb-24">
-      {/* Top Admin Header in Deep Navy #173567 */}
-      <div className="bg-[#173567] text-white p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm border border-[#2854A6]/30">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#2854A6] text-white flex items-center justify-center font-bold">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase font-bold tracking-wider text-white/70 block">
-                Église Évangélique des Assemblées de Dieu de Côte d’Ivoire
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-heading font-bold text-base sm:text-lg text-white">
-                Espace Com — Anyama, Ran-Extension Résidentiel
-              </h1>
-              <span className="px-2 py-0.5 rounded bg-white/20 text-white text-[10px] uppercase font-bold">
-                Admin
-              </span>
-            </div>
-            <p className="text-xs text-white/80">
-              Session active : <strong className="text-white">{adminUser}</strong>
-            </p>
-          </div>
+    <div className="page py-6 sm:py-8 animate-soft-in">
+      {/* Barre supérieure Admin */}
+      <div className="surface mb-6 flex flex-wrap items-center justify-between gap-4 p-4 sm:px-6">
+        <div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-church-tint px-2.5 py-0.5 text-xs font-semibold text-church-blue">
+            <Shield className="h-3.5 w-3.5" /> Espace de gestion sécurisé
+          </span>
+          <h1 className="mt-1 text-xl sm:text-2xl">
+            Administration — {currentAdmin.name}
+          </h1>
         </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onNavigateSubPage('cultes-creer')}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#2854A6] hover:bg-[#1f4489] text-white font-semibold text-xs transition-colors shadow-xs"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>Nouveau Culte</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={onExitAdmin} className="btn-secondary min-h-[40px] text-xs sm:text-sm">
+            <ExternalLink className="h-4 w-4 text-church-blue" /> Voir le site public
           </button>
           <button
-            onClick={() => {
-              setIsAuthenticated(false);
-              showNotification('Vous avez été déconnecté de l’espace administrateur temporaire.');
-            }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium transition-colors"
-            title="Se déconnecter"
+            onClick={onLogout}
+            className="btn-secondary min-h-[40px] border-red-200 text-xs sm:text-sm text-red-700 hover:border-red-300 hover:bg-red-50"
           >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Déconnexion</span>
-          </button>
-          <button
-            onClick={onExitAdmin}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium transition-colors"
-          >
-            <span>Voir le site</span>
+            <LogOut className="h-4 w-4" /> Déconnexion
           </button>
         </div>
       </div>
 
-      {/* Avertissement en langage simple */}
-      <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-900">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-        <span>
-          <strong>Version d’essai :</strong> ce que vous publiez ici est enregistré uniquement sur cet appareil. Les autres
-          administrateurs et les visiteurs ne le verront pas tant que la base de données n’est pas connectée.
-        </span>
+      {/* Notification toast */}
+      {toast && (
+        <div
+          role="status"
+          className={`mb-6 flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm font-medium animate-soft-in ${
+            toast.type === 'ok'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-red-200 bg-red-50 text-red-900'
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            {toast.type === 'ok' ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+            {toast.msg}
+          </span>
+          <button onClick={() => setToast(null)} aria-label="Fermer">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Navigation mobile/tablette */}
+      <div className="mb-6 flex gap-2 overflow-x-auto pb-2 lg:hidden no-scrollbar">
+        {menuItems.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => onNavigateSubPage(id)}
+            className={isMenuActive(id) ? 'chip-active' : 'chip'}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
       </div>
 
-      {/* Admin Subpages Navigation Bar */}
-      <nav
-        aria-label="Navigation de l’administration"
-        className="surface p-2 flex flex-wrap items-center gap-1.5 sm:gap-2"
-      >
-        <button
-          onClick={() => onNavigateSubPage('dashboard')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'dashboard'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <LayoutDashboard className="h-4 w-4" />
-          <span>Tableau de bord</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateSubPage('cultes')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'cultes' || activeSubPage === 'cultes-creer'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <FileText className="h-4 w-4" />
-          <span>Cultes</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateSubPage('evenements')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'evenements' || activeSubPage === 'evenements-creer'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <Calendar className="h-4 w-4" />
-          <span>Événements</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateSubPage('actualites')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'actualites' || activeSubPage === 'actualites-creer'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <Tag className="h-4 w-4" />
-          <span>Actualités</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateSubPage('galerie')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'galerie' || activeSubPage === 'galerie-creer'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <ImageIcon className="h-4 w-4" />
-          <span>Galerie</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateSubPage('departements')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'departements'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <Users className="h-4 w-4" />
-          <span>Départements ({departments.length})</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateSubPage('commentaires')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'commentaires'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <MessageCircle className="h-4 w-4" />
-          <span>Modération</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateSubPage('medias')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'medias'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <Sparkles className="h-4 w-4 text-church-blue" />
-          <span>Images & Textes</span>
-        </button>
-
-        <button
-          onClick={() => onNavigateSubPage('parametres')}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
-            activeSubPage === 'parametres'
-              ? 'bg-church-navy text-white'
-              : 'text-church-muted hover:text-church-navy hover:bg-church-light'
-          }`}
-        >
-          <Settings className="h-4 w-4" />
-          <span>Logo & Infos</span>
-        </button>
-      </nav>
-
-      {feedbackNotice && (
-        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-900 flex items-center gap-2 animate-in fade-in">
-          <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>{feedbackNotice}</span>
-        </div>
-      )}
-
-      {/* 1. SUBPAGE: TABLEAU DE BORD */}
-      {activeSubPage === 'dashboard' && (
-        <div className="space-y-6">
-          {/* Chiffres calculés à partir des données réelles (aucun chiffre inventé) */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {[
-              { label: 'Cultes publiés', value: cultes.filter((c) => c.status === 'publie').length, sub: `${cultes.filter((c) => c.status !== 'publie').length} brouillon(s) ou programmé(s)` },
-              { label: 'Événements', value: events.length, sub: 'dans l’agenda' },
-              { label: 'Réactions', value: cultes.reduce((n, c) => n + c.reactions.likes + c.reactions.hearts + c.reactions.prayers, 0), sub: 'J’aime, cœur, je prie' },
-              { label: 'Commentaires signalés', value: cultes.reduce((n, c) => n + c.comments.filter((m) => m.reported).length, 0), sub: 'à vérifier', action: () => onNavigateSubPage('commentaires') }
-            ].map((k) => (
-              <button
-                key={k.label}
-                onClick={k.action}
-                disabled={!k.action}
-                className="surface p-4 text-left enabled:hover:border-church-blue"
-              >
-                <span className="block text-sm text-church-muted">{k.label}</span>
-                <span className="mt-1 block font-serif text-3xl font-semibold text-church-navy">{k.value}</span>
-                <span className="block text-sm text-church-muted">{k.sub}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h3 className="font-heading font-bold text-base text-church-navy">
-                  Dernières publications en ligne
-                </h3>
-                <span className="text-xs text-slate-400">
-                  {cultes.length} cultes archivés
-                </span>
-              </div>
-
-              <div className="space-y-3">
-                {cultes.map((c) => (
-                  <div
-                    key={c.id}
-                    className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100/70 transition-colors text-xs"
-                  >
-                    <div className="space-y-0.5 truncate max-w-md">
-                      <div className="flex items-center gap-2">
-                        <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                          En ligne
-                        </span>
-                        <span className="font-semibold text-church-navy truncate">
-                          {c.title}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        {c.date} · {c.preacher}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-[11px] text-slate-500 shrink-0">
-                      <span>👍 {c.reactions.likes}</span>
-                      <span>💬 {c.comments.length}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-              <h3 className="font-heading font-bold text-base text-church-navy pb-3 border-b border-slate-100">
-                Raccourcis de Création
-              </h3>
-
-              <div className="space-y-2">
+      <div className="grid gap-6 lg:grid-cols-[260px_1fr] lg:items-start">
+        {/* Sidebar Desktop */}
+        <aside className="hidden lg:block surface p-3 sticky top-20">
+          <nav className="space-y-1">
+            {menuItems.map(({ id, label, icon: Icon, badge }) => {
+              const active = isMenuActive(id);
+              return (
                 <button
-                  onClick={() => onNavigateSubPage('cultes-creer')}
-                  className="w-full text-left p-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-800 flex items-center justify-between transition-colors"
+                  key={id}
+                  onClick={() => onNavigateSubPage(id)}
+                  className={`flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-left text-sm font-medium transition-colors ${
+                    active ? 'bg-church-navy text-white' : 'text-church-dark hover:bg-church-light'
+                  }`}
                 >
-                  <span>Créer un résumé de culte</span>
-                  <ChevronRight className="w-4 h-4 text-slate-400" />
-                </button>
-                <button
-                  onClick={() => onNavigateSubPage('evenements-creer')}
-                  className="w-full text-left p-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-800 flex items-center justify-between transition-colors"
-                >
-                  <span>Publier un nouvel événement</span>
-                  <ChevronRight className="w-4 h-4 text-slate-400" />
-                </button>
-                <button
-                  onClick={() => onNavigateSubPage('actualites-creer')}
-                  className="w-full text-left p-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-800 flex items-center justify-between transition-colors"
-                >
-                  <span>Rédiger un communiqué officiel</span>
-                  <ChevronRight className="w-4 h-4 text-slate-400" />
-                </button>
-                <button
-                  onClick={() => onNavigateSubPage('parametres')}
-                  className="w-full text-left p-3 rounded-xl border border-[#2854A6]/30 bg-[#F4F6F9] hover:bg-blue-50 text-xs font-semibold text-[#173567] flex items-center justify-between transition-colors"
-                >
-                  <span>Gérer ou importer le logo officiel</span>
-                  <ChevronRight className="w-4 h-4 text-[#2854A6]" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. SUBPAGE: CULTES & PRÉDICATIONS LIST */}
-      {activeSubPage === 'cultes' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-7 shadow-xs space-y-5">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <h3 className="font-heading font-bold text-base text-[#173567]">
-                Gestion des Cultes et Prédications
-              </h3>
-              <p className="text-xs text-slate-500">
-                {cultes.length} cultes enregistrés
-              </p>
-            </div>
-            <button
-              onClick={() => onNavigateSubPage('cultes-creer')}
-              className="px-4 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489] transition-colors flex items-center gap-1.5"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Nouveau Culte</span>
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {cultes.map((c) => (
-              <div
-                key={c.id}
-                className="p-4 rounded-xl border border-slate-200/80 bg-church-light flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-church-navy text-sm">
-                      {c.title}
-                    </span>
-                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold text-[10px]">
-                      {c.status}
-                    </span>
-                  </div>
-                  <div className="text-slate-500">
-                    {c.date} · {c.time} · Prédicateur : <strong className="text-slate-700">{c.preacher}</strong>
-                  </div>
-                  <div className="text-amber-800 font-medium">
-                    Texte : {c.scriptureRef}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="font-mono text-slate-500 text-[11px] mr-2">
-                    👍 {c.reactions.likes} · 💬 {c.comments.length}
+                  <span className="flex items-center gap-2.5">
+                    <Icon className={`h-4 w-4 ${active ? 'text-white' : 'text-church-blue'}`} />
+                    {label}
                   </span>
-
-                  <button
-                    onClick={() => setEditingCulte(c)}
-                    className="px-2.5 py-1.5 rounded-lg border border-[#2854A6]/30 text-[#2854A6] bg-blue-50/50 hover:bg-blue-100/50 text-xs font-semibold flex items-center gap-1 transition-colors"
-                    title="Modifier et rectifier ce culte"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    <span>Modifier</span>
-                  </button>
-
-                  {onDeleteCulte && (
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Supprimer définitivement le culte « ${c.title} » ?`)) {
-                          onDeleteCulte(c.id);
-                          showNotification(`Le culte « ${c.title} » a été supprimé.`);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition-colors"
-                      title="Supprimer ce culte"
+                  {badge !== undefined && (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        active ? 'bg-white/20 text-white' : 'bg-church-tint text-church-navy'
+                      }`}
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      {badge}
+                    </span>
                   )}
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
+
+        {/* Contenu principal */}
+        <section className="min-w-0 space-y-6">
+          {/* ==================== DASHBOARD ==================== */}
+          {activeSubPage === 'dashboard' && (() => {
+            const totalViews =
+              cultes.reduce((sum, c) => sum + (c.viewsCount || 0), 0) +
+              events.reduce((sum, e) => sum + (e.viewsCount || 0), 0) +
+              news.reduce((sum, n) => sum + (n.readsCount || 0), 0) +
+              albums.reduce((sum, a) => sum + (a.viewsCount || 0), 0);
+
+            const totalReactions =
+              cultes.reduce(
+                (sum, c) => sum + (c.reactions?.likes || 0) + (c.reactions?.hearts || 0) + (c.reactions?.prayers || 0),
+                0
+              ) +
+              events.reduce((sum, e) => sum + (e.likes || 0), 0) +
+              news.reduce((sum, n) => sum + (n.likes || 0), 0);
+
+            return (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <div className="surface p-4 sm:p-5">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-church-muted">
+                      <Eye className="h-3.5 w-3.5 text-church-blue" /> Vues totales
+                    </p>
+                    <p className="mt-1 font-serif text-3xl font-semibold text-church-navy">{totalViews}</p>
+                    <p className="mt-0.5 text-xs text-church-muted">Cultes, événements, actus & albums</p>
+                  </div>
+                  <div className="surface p-4 sm:p-5">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-church-muted">
+                      <Heart className="h-3.5 w-3.5 text-church-blue" /> Réactions & Likes
+                    </p>
+                    <p className="mt-1 font-serif text-3xl font-semibold text-church-navy">{totalReactions}</p>
+                    <p className="mt-0.5 text-xs text-church-muted">Sans création de compte</p>
+                  </div>
+                  <div className="surface p-4 sm:p-5">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-church-muted">
+                      <MessageCircle className="h-3.5 w-3.5 text-church-blue" /> Commentaires
+                    </p>
+                    <p className="mt-1 font-serif text-3xl font-semibold text-church-navy">{allComments.length}</p>
+                    <p className="mt-0.5 text-xs text-church-muted">{allComments.filter((c) => c.reported).length} signalé(s)</p>
+                  </div>
+                  <div className="surface p-4 sm:p-5">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-church-muted">
+                      <BellRing className="h-3.5 w-3.5 text-church-blue" /> Abonnés Push PWA
+                    </p>
+                    <p className="mt-1 font-serif text-3xl font-semibold text-church-navy">{pushSubscribersCount}</p>
+                    <p className="mt-0.5 text-xs text-church-muted">{cultes.filter((c) => c.status === 'publie').length} culte(s) en ligne</p>
+                  </div>
+                </div>
+
+                <div className="surface p-6">
+                  <h2 className="text-xl mb-4">Actions rapides</h2>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <button onClick={() => openCulteForm()} className="btn-primary justify-start">
+                      <Plus className="h-4 w-4" /> Publier un culte
+                    </button>
+                    <button onClick={() => openEventForm()} className="btn-secondary justify-start">
+                      <Plus className="h-4 w-4 text-church-blue" /> Nouvel événement
+                    </button>
+                    <button onClick={() => openNewsForm()} className="btn-secondary justify-start">
+                      <Plus className="h-4 w-4 text-church-blue" /> Nouvelle actualité
+                    </button>
+                    <button onClick={() => openAlbumForm()} className="btn-secondary justify-start">
+                      <Plus className="h-4 w-4 text-church-blue" /> Importer un lot photo
+                    </button>
+                    <button onClick={() => onNavigateSubPage('drive')} className="btn-secondary justify-start">
+                      <HardDrive className="h-4 w-4 text-church-blue" /> Synchroniser Drive
+                    </button>
+                  </div>
+                </div>
+
+                {/* Envoi réel de notifications Push PWA */}
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!pushBody.trim()) {
+                      notify('Veuillez saisir le message de la notification.', 'err');
+                      return;
+                    }
+                    setSendingPush(true);
+                    try {
+                      const res = await api.sendAdminPush({
+                        title: pushTitle.trim(),
+                        body: pushBody.trim(),
+                        url: pushTarget
+                      });
+                      onSyncPushState({
+                        pushSubscribersCount: res.subscribersCount,
+                        pushHistory: res.pushHistory
+                      });
+                      setPushBody('');
+                      notify(`Notification envoyée à ${res.sentCount} appareil(s) abonné(s).`);
+                    } catch (err) {
+                      notify(err instanceof Error ? err.message : 'Erreur d’envoi Push.', 'err');
+                    } finally {
+                      setSendingPush(false);
+                    }
+                  }}
+                  className="surface p-6 space-y-4"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h2 className="text-xl flex items-center gap-2">
+                        <BellRing className="h-5 w-5 text-church-blue" /> Envoyer une notification Push PWA
+                      </h2>
+                      <p className="text-xs text-church-muted mt-0.5">
+                        Avertissez instantanément les {pushSubscribersCount} appareil(s) abonné(s) sur mobile et ordinateur.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
+                    <input
+                      value={pushTitle}
+                      onChange={(e) => setPushTitle(e.target.value)}
+                      placeholder="Titre de l’alerte"
+                      className="field text-sm"
+                    />
+                    <select
+                      value={pushTarget}
+                      onChange={(e) => setPushTarget(e.target.value)}
+                      className="field text-sm"
+                    >
+                      <option value="/">Ouvrir : Accueil</option>
+                      <option value="/?page=cultes">Ouvrir : Cultes</option>
+                      <option value="/?page=evenements">Ouvrir : Événements</option>
+                      <option value="/?page=actualites">Ouvrir : Actualités</option>
+                      <option value="/?page=galerie">Ouvrir : Galerie</option>
+                    </select>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={pushBody}
+                    onChange={(e) => setPushBody(e.target.value)}
+                    placeholder="Ex. Nouveau culte de ce dimanche disponible en écoute audio et vidéo."
+                    className="field py-2.5 min-h-[70px] text-sm"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-xs text-church-muted">
+                      {pushHistory.length > 0
+                        ? `Dernier envoi : ${new Date(pushHistory[0].sentAt).toLocaleString('fr-FR')} (${pushHistory[0].recipientCount} reçu(s))`
+                        : 'Aucun envoi effectué pour le moment.'}
+                    </span>
+                    <button type="submit" disabled={sendingPush} className="btn-primary min-h-[40px]">
+                      <Send className="h-4 w-4" />
+                      {sendingPush ? 'Envoi en cours...' : 'Envoyer la notification'}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="surface p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <h2 className="text-xl">Accès caché configuré</h2>
+                    <button onClick={() => onNavigateSubPage('securite')} className="link text-sm">
+                      Configurer la sécurité
+                    </button>
+                  </div>
+                  <p className="text-sm text-church-muted">
+                    L’espace administrateur est entièrement masqué du site public. Vous pouvez y accéder via le lien secret{' '}
+                    <code className="rounded-lg bg-church-light px-2 py-0.5 font-mono text-xs text-church-navy">
+                      #/{security.secretGateSlug}
+                    </code>
+                    {security.enableKeyboardShortcut && ', le raccourci Ctrl+Maj+A'}
+                    {security.enableFooterTap && ' ou 5 clics rapides sur l’année © en pied de page'}.
+                  </p>
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })()}
 
-          {/* Modal / Formulaire de modification d'un culte existant */}
-          {editingCulte && (
-            <div className="p-6 bg-[#F4F6F9] rounded-2xl border-2 border-[#2854A6] space-y-4 shadow-sm animate-in fade-in">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <div className="flex items-center gap-2">
-                  <Edit className="w-4 h-4 text-[#2854A6]" />
-                  <h4 className="font-heading font-bold text-base text-[#173567]">
-                    Modifier & Rectifier le Culte : « {editingCulte.title} »
-                  </h4>
+          {/* ==================== LISTE CULTES ==================== */}
+          {activeSubPage === 'cultes' && (() => {
+            const sortedCultes = sortCultesByDateDesc(cultes).filter((c) =>
+              culteCategoryFilter === 'tous' ? true : inferCulteServiceType(c) === culteCategoryFilter
+            );
+            return (
+              <div className="surface p-5 sm:p-6 space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl">Cultes & Prédications</h2>
+                    <p className="text-sm text-church-muted">
+                      Classés automatiquement par date et par catégorie : Dimanche, Événement et Mardi.
+                    </p>
+                  </div>
+                  <button onClick={() => openCulteForm()} className="btn-primary">
+                    <Plus className="h-4 w-4" /> Nouveau culte
+                  </button>
                 </div>
-                <button
-                  onClick={() => setEditingCulte(null)}
-                  className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 hover:bg-white"
-                >
-                  ✕ Fermer
+
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      { id: 'tous', label: `Tous (${cultes.length})` },
+                      { id: 'dimanche', label: `Dimanche (${cultes.filter((c) => inferCulteServiceType(c) === 'dimanche').length})` },
+                      { id: 'evenement', label: `Événement (${cultes.filter((c) => inferCulteServiceType(c) === 'evenement').length})` },
+                      { id: 'mardi', label: `Mardi (${cultes.filter((c) => inferCulteServiceType(c) === 'mardi').length})` }
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setCulteCategoryFilter(tab.id)}
+                      className={culteCategoryFilter === tab.id ? 'chip-active text-xs' : 'chip text-xs'}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {sortedCultes.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-church-line p-8 text-center text-sm text-church-muted">
+                    Aucun culte enregistré dans cette catégorie.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-church-line">
+                    {sortedCultes.map((c) => {
+                      const sType = inferCulteServiceType(c);
+                      return (
+                        <div key={c.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="rounded-full bg-church-tint px-2.5 py-0.5 font-semibold text-church-blue">
+                                {CULTE_TYPE_LABELS[sType]}
+                                {sType === 'evenement' && c.eventLabel ? ` · ${c.eventLabel}` : ''}
+                              </span>
+                              <span
+                                className={`rounded-full px-2.5 py-0.5 font-semibold ${
+                                  c.status === 'publie'
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : c.status === 'programme'
+                                    ? 'bg-amber-50 text-amber-800'
+                                    : 'bg-church-light text-church-muted'
+                                }`}
+                              >
+                                {c.status === 'publie' ? 'Publié' : c.status === 'programme' ? `Programmé (${c.scheduledDate || c.date})` : 'Brouillon'}
+                              </span>
+                              <span className="text-church-muted">{c.date}</span>
+                              {c.audioUrl && <span className="text-church-blue font-medium">Audio</span>}
+                              {c.hasVideo && <span className="text-church-blue font-medium">Vidéo</span>}
+                            </div>
+                            <h3 className="mt-1 font-serif text-lg text-church-navy truncate">{c.title}</h3>
+                            <p className="mt-0.5 text-xs text-church-muted">
+                              {c.preacher ? `${c.preacher} · ` : ''}
+                              {c.viewsCount || 0} vue(s) · {(c.reactions?.likes || 0) + (c.reactions?.hearts || 0) + (c.reactions?.prayers || 0)} réaction(s) · {(c.comments || []).length} commentaire(s)
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button onClick={() => openCulteForm(c)} className="btn-secondary min-h-[38px] px-3 text-xs">
+                              <Pencil className="h-3.5 w-3.5" /> Modifier
+                            </button>
+                            {confirmDeleteKey === `culte:${c.id}` ? (
+                              <button
+                                onClick={async () => {
+                                  const res = await api.deleteCulte(c.id);
+                                  onSyncPublicState({ cultes: res.cultes });
+                                  setConfirmDeleteKey(null);
+                                  notify('Culte supprimé.');
+                                }}
+                                className="btn-primary min-h-[38px] bg-red-600 hover:bg-red-700 px-3 text-xs"
+                              >
+                                Confirmer
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmDeleteKey(`culte:${c.id}`)}
+                                className="btn-secondary min-h-[38px] px-3 text-xs text-red-700 hover:bg-red-50"
+                                aria-label="Supprimer ce culte"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ==================== CREER / MODIFIER CULTE ==================== */}
+          {activeSubPage === 'cultes-creer' && editingCulte && (
+            <form onSubmit={handleSaveCulte} className="surface p-5 sm:p-7 space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-church-line pb-4">
+                <h2 className="text-2xl">{cultes.some((c) => c.id === editingCulte.id) ? 'Modifier le culte' : 'Publier un culte'}</h2>
+                <button type="button" onClick={() => onNavigateSubPage('cultes')} className="btn-ghost text-sm">
+                  Annuler
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Titre du culte</label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Titre de la prédication *</label>
                   <input
-                    type="text"
+                    required
                     value={editingCulte.title}
                     onChange={(e) => setEditingCulte({ ...editingCulte, title: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    placeholder="Ex. Marcher par la foi en toute circonstance"
+                    className="field"
                   />
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Sous-titre / Thème</label>
-                  <input
-                    type="text"
-                    value={editingCulte.subtitle || ''}
-                    onChange={(e) => setEditingCulte({ ...editingCulte, subtitle: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Classement (Dimanche / Événement / Mardi) *</label>
+                  <select
+                    value={editingCulte.serviceType || inferCulteServiceType(editingCulte)}
+                    onChange={(e) =>
+                      setEditingCulte({ ...editingCulte, serviceType: e.target.value as CulteServiceType })
+                    }
+                    className="field"
+                  >
+                    <option value="dimanche">Culte du Dimanche</option>
+                    <option value="evenement">Culte d’Événement spécial</option>
+                    <option value="mardi">Culte du Mardi (Enseignement / Prière)</option>
+                  </select>
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Date</label>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Date du culte *</label>
                   <input
                     type="date"
+                    required
                     value={editingCulte.date}
-                    onChange={(e) => setEditingCulte({ ...editingCulte, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    onChange={(e) => {
+                      const nextDate = e.target.value;
+                      setEditingCulte({
+                        ...editingCulte,
+                        date: nextDate,
+                        serviceType: inferCulteServiceType({ date: nextDate, title: editingCulte.title })
+                      });
+                    }}
+                    className="field"
                   />
                 </div>
-
+                {(editingCulte.serviceType || inferCulteServiceType(editingCulte)) === 'evenement' && (
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Nom de l’événement (optionnel)</label>
+                    <input
+                      value={editingCulte.eventLabel || ''}
+                      onChange={(e) => setEditingCulte({ ...editingCulte, eventLabel: e.target.value })}
+                      placeholder="Ex. Veillée de prière, Convention annuelle, Culte de Pâques..."
+                      className="field"
+                    />
+                  </div>
+                )}
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Horaire</label>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Horaire</label>
                   <input
-                    type="text"
                     value={editingCulte.time}
                     onChange={(e) => setEditingCulte({ ...editingCulte, time: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    placeholder="Ex. 07h30 - 11h00"
+                    className="field"
                   />
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Prédicateur</label>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Orateur / Prédicateur</label>
                   <input
-                    type="text"
                     value={editingCulte.preacher}
                     onChange={(e) => setEditingCulte({ ...editingCulte, preacher: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    className="field"
                   />
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Modérateur</label>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Passage biblique (Référence)</label>
                   <input
-                    type="text"
-                    value={editingCulte.moderator || ''}
-                    onChange={(e) => setEditingCulte({ ...editingCulte, moderator: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Passage biblique de référence</label>
-                  <input
-                    type="text"
                     value={editingCulte.scriptureRef}
                     onChange={(e) => setEditingCulte({ ...editingCulte, scriptureRef: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    placeholder="Ex. Romains 8 : 28-31"
+                    className="field"
                   />
                 </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Résumé pastoral du message</label>
-                  <textarea
-                    rows={3}
-                    value={editingCulte.sermonSummary}
-                    onChange={(e) => setEditingCulte({ ...editingCulte, sermonSummary: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Lien vidéo YouTube (optionnel)</label>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Statut de publication</label>
+                  <select
+                    value={editingCulte.status}
+                    onChange={(e) =>
+                      setEditingCulte({ ...editingCulte, status: e.target.value as Culte['status'] })
+                    }
+                    className="field"
+                  >
+                    <option value="publie">Publié immédiatement</option>
+                    <option value="programme">Publication automatique programmée</option>
+                    <option value="brouillon">Brouillon (caché au public)</option>
+                  </select>
+                </div>
+                {editingCulte.status === 'programme' && (
+                  <div>
+                    <label className="mb-1 flex items-center gap-1 text-sm font-medium text-church-navy">
+                      <Clock className="h-4 w-4 text-church-blue" /> Date de publication auto
+                    </label>
+                    <input
+                      type="date"
+                      value={editingCulte.scheduledDate || editingCulte.date}
+                      onChange={(e) => setEditingCulte({ ...editingCulte, scheduledDate: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-church-navy">Résumé court du message</label>
+                <textarea
+                  rows={3}
+                  value={editingCulte.sermonSummary}
+                  onChange={(e) => setEditingCulte({ ...editingCulte, sermonSummary: e.target.value })}
+                  placeholder="Résumé concis affiché dès l'accueil et dans la liste des cultes..."
+                  className="field py-2.5 min-h-[90px]"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-church-navy">Points clés à retenir (un par ligne)</label>
+                <textarea
+                  rows={3}
+                  value={culteKeyPointsText}
+                  onChange={(e) => setCulteKeyPointsText(e.target.value)}
+                  placeholder="Point 1&#10;Point 2"
+                  className="field py-2.5 min-h-[84px]"
+                />
+              </div>
+
+              {/* Audio direct */}
+              <div className="rounded-2xl border border-church-line p-4 space-y-3">
+                <h3 className="text-lg">Audio de la prédication</h3>
+                <MediaBatchUploader
+                  mode="audio"
+                  allowFolder={false}
+                  onUploadedFiles={(res) => {
+                    if (res[0]) setEditingCulte((prev) => (prev ? { ...prev, audioUrl: res[0].url } : prev));
+                  }}
+                />
+                <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
                   <input
-                    type="text"
+                    value={editingCulte.audioUrl || ''}
+                    onChange={(e) => setEditingCulte({ ...editingCulte, audioUrl: e.target.value })}
+                    placeholder="Lien audio (/uploads/... ou URL https://)"
+                    className="field text-sm"
+                  />
+                  <input
+                    value={editingCulte.audioDuration || ''}
+                    onChange={(e) => setEditingCulte({ ...editingCulte, audioDuration: e.target.value })}
+                    placeholder="Durée (ex. 42 min)"
+                    className="field text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Vidéo directe */}
+              <div className="rounded-2xl border border-church-line p-4 space-y-3">
+                <h3 className="text-lg">Vidéo du culte (YouTube ou fichier MP4)</h3>
+                <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
+                  <input
                     value={editingCulte.videoUrl || ''}
                     onChange={(e) =>
                       setEditingCulte({
                         ...editingCulte,
-                        videoUrl: toYoutubeEmbed(e.target.value),
-                        hasVideo: !!e.target.value.trim()
+                        videoUrl: e.target.value,
+                        hasVideo: Boolean(e.target.value.trim())
                       })
                     }
-                    placeholder="https://youtu.be/..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    placeholder="Lien YouTube ou /uploads/video.mp4"
+                    className="field text-sm"
+                  />
+                  <input
+                    value={editingCulte.videoDuration || ''}
+                    onChange={(e) => setEditingCulte({ ...editingCulte, videoDuration: e.target.value })}
+                    placeholder="Durée (ex. 55 min)"
+                    className="field text-sm"
                   />
                 </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Statut de diffusion</label>
-                  <select
-                    value={editingCulte.status}
-                    onChange={(e) => setEditingCulte({ ...editingCulte, status: e.target.value as any })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  >
-                    <option value="publie">Publié sur le site</option>
-                    <option value="programme">Programmé</option>
-                    <option value="brouillon">Brouillon privé</option>
-                  </select>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Image de couverture du culte</label>
-                  <div className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200">
-                    <img
-                      src={editingCulte.coverImage}
-                      alt="Aperçu couverture"
-                      className="w-20 h-14 object-cover rounded-lg border border-slate-200 shrink-0"
-                    />
-                    <div className="space-y-1.5 flex-1">
-                      <label className="px-3 py-1.5 rounded-lg bg-[#2854A6] text-white font-semibold text-xs cursor-pointer hover:bg-[#1f4489] transition-colors inline-flex items-center gap-1.5">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Changer l'image depuis mon appareil</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) =>
-                            handleImageFileUpload(e, (url) => setEditingCulte({ ...editingCulte, coverImage: url }))
-                          }
-                          className="hidden"
-                        />
-                      </label>
-                      <input
-                        type="text"
-                        value={editingCulte.coverImage}
-                        onChange={(e) => setEditingCulte({ ...editingCulte, coverImage: e.target.value })}
-                        placeholder="ou lien direct..."
-                        className="w-full px-2.5 py-1 text-xs border border-slate-200 rounded"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setEditingCulte(null)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-white"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onUpdateCulte) {
-                      onUpdateCulte(editingCulte);
+                <MediaBatchUploader
+                  mode="video"
+                  allowFolder={false}
+                  onUploadedFiles={(res) => {
+                    if (res[0]) {
+                      setEditingCulte((prev) =>
+                        prev ? { ...prev, videoUrl: res[0].url, hasVideo: true } : prev
+                      );
                     }
-                    setEditingCulte(null);
-                    showNotification(`Le culte « ${editingCulte.title} » a été mis à jour.`);
                   }}
-                  className="px-5 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489]"
-                >
-                  Enregistrer les modifications
-                </button>
+                />
               </div>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* 3. SUBPAGE: PAGE DÉDIÉE DE CRÉATION DE CULTE */}
-      {activeSubPage === 'cultes-creer' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-7 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
-            <div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-                <button
-                  onClick={() => onNavigateSubPage('cultes')}
-                  className="hover:text-church-navy text-slate-600 font-medium"
-                >
-                  Cultes
-                </button>
-                <span>/</span>
-                <span>Nouveau Culte</span>
-              </div>
-              <h2 className="font-heading font-bold text-xl text-church-navy">
-                {isFullFormView
-                  ? 'Formulaire Complet de Création de Culte'
-                  : `Création Guidée de Culte — Étape ${wizardStep} sur 5`}
-              </h2>
-            </div>
-
-            <button
-              onClick={() => setIsFullFormView(!isFullFormView)}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition-colors flex items-center gap-1.5 self-start sm:self-auto"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span>
-                {isFullFormView
-                  ? 'Revenir au mode guidé 5 étapes'
-                  : 'Passer à la vue complète (formulaire unique)'}
-              </span>
-            </button>
-          </div>
-
-          {!isFullFormView && (
-            <div className="grid grid-cols-5 gap-2 text-center text-xs">
-              {[
-                { n: 1, label: '1. Informations' },
-                { n: 2, label: '2. Prédication' },
-                { n: 3, label: '3. Liturgie' },
-                { n: 4, label: '4. Médias' },
-                { n: 5, label: '5. Diffusion' }
-              ].map((step) => (
-                <button
-                  key={step.n}
-                  onClick={() => setWizardStep(step.n)}
-                  className={`py-2 px-1 rounded-xl font-semibold transition-all text-[11px] truncate ${
-                    wizardStep === step.n
-                      ? 'bg-[#2854A6] text-white shadow-xs'
-                      : wizardStep > step.n
-                      ? 'bg-blue-100 text-[#173567]'
-                      : 'bg-[#F4F6F9] text-[#343B46]/70'
-                  }`}
-                >
-                  {step.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Form Fields */}
-          <div className="space-y-6">
-            {(isFullFormView || wizardStep === 1) && (
-              <div className="space-y-4 p-4 rounded-xl bg-church-light border border-slate-200/80">
-                <h3 className="font-heading font-bold text-sm text-church-navy flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-church-navy text-white text-xs flex items-center justify-center">1</span>
-                  <span>Informations Générales</span>
-                </h3>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Titre du Culte / Thème Dominical
-                    </label>
-                    <input
-                      type="text"
-                      value={serviceForm.title}
-                      onChange={(e) => setServiceForm({ ...serviceForm, title: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Sous-titre ou Type
-                    </label>
-                    <input
-                      type="text"
-                      value={serviceForm.subtitle}
-                      onChange={(e) => setServiceForm({ ...serviceForm, subtitle: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Date
-                    </label>
-                    <input
-                      type="date"
-                      value={serviceForm.date}
-                      onChange={(e) => setServiceForm({ ...serviceForm, date: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Horaire
-                    </label>
-                    <input
-                      type="text"
-                      value={serviceForm.time}
-                      onChange={(e) => setServiceForm({ ...serviceForm, time: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Prédicateur
-                    </label>
-                    <input
-                      type="text"
-                      value={serviceForm.preacher}
-                      onChange={(e) => setServiceForm({ ...serviceForm, preacher: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Modérateur
-                    </label>
-                    <input
-                      type="text"
-                      value={serviceForm.moderator}
-                      onChange={(e) => setServiceForm({ ...serviceForm, moderator: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {(isFullFormView || wizardStep === 2) && (
-              <div className="space-y-4 p-4 rounded-xl bg-church-light border border-slate-200/80">
-                <h3 className="font-heading font-bold text-sm text-church-navy flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-church-navy text-white text-xs flex items-center justify-center">2</span>
-                  <span>Prédication & Texte Biblique</span>
-                </h3>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Références Bibliques
-                    </label>
-                    <input
-                      type="text"
-                      value={serviceForm.scriptureRef}
-                      onChange={(e) => setServiceForm({ ...serviceForm, scriptureRef: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Extrait du passage biblique
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={serviceForm.scripturePassage}
-                      onChange={(e) => setServiceForm({ ...serviceForm, scripturePassage: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Résumé pastoral du message
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={serviceForm.sermonSummary}
-                      onChange={(e) => setServiceForm({ ...serviceForm, sermonSummary: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Points à retenir (un par ligne, facultatif)
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={serviceForm.keyPoints.join('\n')}
-                      onChange={(e) => setServiceForm({ ...serviceForm, keyPoints: e.target.value.split('\n') })}
-                      placeholder={'La joie est un choix\nLa prière chasse l’inquiétude'}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {(isFullFormView || wizardStep === 3) && (
-              <div className="space-y-4 p-4 rounded-xl bg-church-light border border-slate-200/80">
-                <h3 className="font-heading font-bold text-sm text-church-navy flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-church-navy text-white text-xs flex items-center justify-center">3</span>
-                  <span>Déroulement Liturgique</span>
-                </h3>
-
-                <div className="space-y-2">
-                  {serviceForm.liturgySteps.map((step, idx) => (
-                    <div key={idx} className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2 bg-white rounded-lg border border-slate-200 text-xs">
-                      <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          value={step.time}
-                          placeholder="Horaire"
-                          onChange={(e) => {
-                            const newLit = [...serviceForm.liturgySteps];
-                            newLit[idx].time = e.target.value;
-                            setServiceForm({ ...serviceForm, liturgySteps: newLit });
-                          }}
-                          className="w-full px-2 py-1.5 border border-slate-200 rounded"
-                        />
-                      </div>
-                      <div className="sm:col-span-6">
-                        <input
-                          type="text"
-                          value={step.title}
-                          placeholder="Étape"
-                          onChange={(e) => {
-                            const newLit = [...serviceForm.liturgySteps];
-                            newLit[idx].title = e.target.value;
-                            setServiceForm({ ...serviceForm, liturgySteps: newLit });
-                          }}
-                          className="w-full px-2 py-1.5 border border-slate-200 rounded font-medium"
-                        />
-                      </div>
-                      <div className="sm:col-span-4">
-                        <input
-                          type="text"
-                          value={step.leader}
-                          placeholder="Responsable"
-                          onChange={(e) => {
-                            const newLit = [...serviceForm.liturgySteps];
-                            newLit[idx].leader = e.target.value;
-                            setServiceForm({ ...serviceForm, liturgySteps: newLit });
-                          }}
-                          className="w-full px-2 py-1.5 border border-slate-200 rounded"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setServiceForm({ ...serviceForm, liturgySteps: serviceForm.liturgySteps.filter((_, i) => i !== idx) })
-                        }
-                        className="sm:col-span-12 justify-self-start text-xs text-church-muted hover:text-[#B42318]"
-                      >
-                        Retirer cette étape
-                      </button>
-                    </div>
-                  ))}
-                  {serviceForm.liturgySteps.length === 0 && (
-                    <p className="text-xs text-church-muted">Facultatif. Ajoutez les étapes du culte si vous souhaitez les afficher.</p>
-                  )}
+              {/* Image de couverture & Lot de photos */}
+              <div className="rounded-2xl border border-church-line p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-lg">Couverture & Photos du culte (import par lot ou Drive)</h3>
                   <button
                     type="button"
-                    onClick={() =>
-                      setServiceForm({
-                        ...serviceForm,
-                        liturgySteps: [...serviceForm.liturgySteps, { time: '', title: '', leader: '' }]
-                      })
-                    }
-                    className="btn-secondary text-xs"
+                    onClick={() => setShowCulteDrivePicker((v) => !v)}
+                    className="btn-secondary min-h-[38px] text-xs"
                   >
-                    + Ajouter une étape
+                    <HardDrive className="h-3.5 w-3.5 text-church-blue" />
+                    {showCulteDrivePicker ? 'Masquer Google Drive' : 'Importer depuis Google Drive'}
                   </button>
                 </div>
-              </div>
-            )}
 
-            {(isFullFormView || wizardStep === 4) && (
-              <div className="space-y-4 p-4 rounded-xl bg-church-light border border-slate-200/80">
-                <h3 className="font-heading font-bold text-sm text-church-navy flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-church-navy text-white text-xs flex items-center justify-center">4</span>
-                  <span>Médias & Galerie</span>
-                </h3>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Lien de la vidéo YouTube (facultatif)
-                  </label>
-                  <input
-                    type="url"
-                    inputMode="url"
-                    value={serviceForm.videoUrl}
-                    placeholder="https://youtu.be/…"
-                    onChange={(e) => setServiceForm({ ...serviceForm, videoUrl: toYoutubeEmbed(e.target.value) })}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none"
+                {showCulteDrivePicker && (
+                  <GoogleDriveBrowser
+                    compact
+                    allowDocuments
+                    linkedAccounts={driveAccounts}
+                    linkedFolders={driveFolders}
+                    defaultCategory="Cultes"
+                    onSyncDriveState={(patch) => {
+                      onSyncDriveState(patch);
+                      if (patch.albums) onSyncPublicState({ albums: patch.albums });
+                    }}
+                    onImportedToForm={(items, docs) => {
+                      const importedPhotos = items.filter((it) => it.type === 'photo').map((it) => it.url);
+                      const importedVideos = items.filter((it) => it.type === 'video');
+                      const importedAudios = items.filter((it) => it.type === 'audio');
+                      const importedDocs = docs || [];
+                      setEditingCulte((prev) => {
+                        if (!prev) return prev;
+                        let nextVideoUrl = prev.videoUrl || '';
+                        let nextHasVideo = prev.hasVideo;
+                        const extraVideos: MediaItem[] = [];
+                        importedVideos.forEach((v) => {
+                          if (!nextVideoUrl) {
+                            nextVideoUrl = v.url;
+                            nextHasVideo = true;
+                          } else {
+                            extraVideos.push(v);
+                          }
+                        });
+                        let nextAudioUrl = prev.audioUrl || '';
+                        const extraAudios: MediaItem[] = [];
+                        importedAudios.forEach((a) => {
+                          if (!nextAudioUrl) {
+                            nextAudioUrl = a.url;
+                          } else {
+                            extraAudios.push(a);
+                          }
+                        });
+                        return {
+                          ...prev,
+                          photos: [...prev.photos, ...importedPhotos],
+                          coverImage: prev.coverImage || importedPhotos[0] || '',
+                          videoUrl: nextVideoUrl,
+                          hasVideo: nextHasVideo,
+                          audioUrl: nextAudioUrl,
+                          mediaItems: [...(prev.mediaItems || []), ...extraVideos, ...extraAudios],
+                          documents: [...prev.documents, ...importedDocs]
+                        };
+                      });
+                    }}
+                    onNotify={notify}
                   />
-                  <p className="mt-1 text-[11px] text-church-muted">Collez le lien copié depuis l’application YouTube.</p>
-                </div>
+                )}
 
-                <div className="border-2 border-dashed border-slate-300 rounded-xl p-5 text-center bg-white space-y-2">
-                  <Upload className="w-6 h-6 text-church-blue mx-auto" />
-                  <h4 className="text-xs font-semibold text-church-navy">
-                    Import de photographies depuis le téléphone
-                  </h4>
-                  <label className="inline-block mt-2 px-4 py-2 bg-church-navy hover:bg-church-blue text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors">
-                    <span>Parcourir les photos</span>
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        if (e.target.files) {
-                          const names = Array.from(e.target.files).map(f => f.name);
-                          setSimulatedFiles(prev => [...prev, ...names]);
-                        }
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-2 text-xs font-semibold text-church-muted">Image de couverture</p>
+                    <MediaBatchUploader
+                      mode="single-image"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setEditingCulte((prev) => (prev ? { ...prev, coverImage: res[0].url } : prev));
                       }}
                     />
-                  </label>
+                  </div>
+                  <div>
+                    <p className="mb-2 text-xs font-semibold text-church-muted">Photos du culte (lot ou dossier)</p>
+                    <MediaBatchUploader
+                      mode="photos"
+                      onUploadedFiles={(res) => {
+                        setEditingCulte((prev) =>
+                          prev ? { ...prev, photos: [...prev.photos, ...res.map((r) => r.url)] } : prev
+                        );
+                      }}
+                    />
+                  </div>
                 </div>
+                {editingCulte.photos.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                    {editingCulte.photos.map((p, i) => (
+                      <div key={i} className="relative overflow-hidden rounded-xl border border-church-line">
+                        <img src={sanitizeUrl(p)} alt="" className="aspect-square w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingCulte({
+                              ...editingCulte,
+                              photos: editingCulte.photos.filter((_, idx) => idx !== i)
+                            })
+                          }
+                          className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-red-700"
+                          aria-label="Retirer cette photo"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-                <div className="flex flex-wrap gap-2">
-                  {simulatedFiles.map((fn, idx) => (
-                    <div key={idx} className="px-2.5 py-1 rounded bg-slate-200 text-slate-800 text-xs">
-                      {fn}
+                {(editingCulte.mediaItems || []).length > 0 && (
+                  <div className="space-y-2 border-t border-church-line pt-3">
+                    <p className="text-xs font-semibold text-church-navy">
+                      Vidéos & Audios complémentaires ({editingCulte.mediaItems!.length})
+                    </p>
+                    <ul className="divide-y divide-church-line rounded-xl border border-church-line">
+                      {editingCulte.mediaItems!.map((m, idx) => (
+                        <li key={m.id || idx} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                          <span className="flex min-w-0 items-center gap-2 truncate">
+                            {m.type === 'video' ? (
+                              <Film className="h-4 w-4 shrink-0 text-church-blue" />
+                            ) : (
+                              <Headphones className="h-4 w-4 shrink-0 text-church-blue" />
+                            )}
+                            <span className="truncate">{m.caption || (m.type === 'video' ? 'Vidéo' : 'Audio')}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingCulte({
+                                ...editingCulte,
+                                mediaItems: (editingCulte.mediaItems || []).filter((_, i) => i !== idx)
+                              })
+                            }
+                            className="shrink-0 text-xs text-red-700 hover:underline"
+                          >
+                            Retirer
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Documents joints */}
+              <div className="rounded-2xl border border-church-line p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-lg">Documents associés (PDF, Word, PowerPoint ou Google Drive)</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowCulteDrivePicker(true)}
+                    className="btn-secondary min-h-[36px] text-xs"
+                  >
+                    <HardDrive className="h-3.5 w-3.5 text-church-blue" />
+                    Document entier depuis Drive
+                  </button>
+                </div>
+                <MediaBatchUploader
+                  mode="documents"
+                  onUploadedFiles={() => {}}
+                  onUploadedDocuments={(docs) =>
+                    setEditingCulte((prev) => (prev ? { ...prev, documents: [...prev.documents, ...docs] } : prev))
+                  }
+                />
+                {editingCulte.documents.length > 0 && (
+                  <ul className="divide-y divide-church-line rounded-xl border border-church-line">
+                    {editingCulte.documents.map((d, i) => (
+                      <li key={i} className="flex items-center justify-between px-3 py-2 text-sm">
+                        <span className="flex items-center gap-2 truncate">
+                          <FileText className="h-4 w-4 text-church-blue shrink-0" />
+                          {d.title} {d.fileSize && <span className="text-xs text-church-muted">({d.fileSize})</span>}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingCulte({
+                              ...editingCulte,
+                              documents: editingCulte.documents.filter((_, idx) => idx !== i)
+                            })
+                          }
+                          className="text-xs text-red-700 hover:underline"
+                        >
+                          Retirer
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => onNavigateSubPage('cultes')} className="btn-secondary">
+                  Annuler
+                </button>
+                <button type="submit" disabled={saving} className="btn-primary">
+                  {saving ? 'Enregistrement...' : 'Enregistrer le culte'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ==================== LISTE ÉVÉNEMENTS ==================== */}
+          {activeSubPage === 'evenements' && (
+            <div className="surface p-5 sm:p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl">Événements & Affiches</h2>
+                  <p className="text-sm text-church-muted">Importez des affiches, activez des sondages et gérez vos rendez-vous.</p>
+                </div>
+                <button onClick={() => openEventForm()} className="btn-primary">
+                  <Plus className="h-4 w-4" /> Nouvel événement
+                </button>
+              </div>
+
+              {events.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-church-line p-8 text-center text-sm text-church-muted">
+                  Aucun événement créé pour le moment.
+                </div>
+              ) : (
+                <div className="divide-y divide-church-line">
+                  {events.map((ev) => (
+                    <div key={ev.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src={sanitizeUrl(ev.coverImage) || HERO_IMAGE}
+                          alt=""
+                          className="h-14 w-14 shrink-0 rounded-xl object-cover bg-church-navy"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-church-blue">{ev.category} · {ev.date}</span>
+                          <h3 className="font-serif text-lg text-church-navy truncate">{ev.title}</h3>
+                          <p className="text-xs text-church-muted">
+                            {ev.viewsCount || 0} vue(s) · {ev.likes || 0} j’aime · {(ev.comments || []).length} commentaire(s) · {ev.attendeesCount} inscrit(s)
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={() => openEventForm(ev)} className="btn-secondary min-h-[38px] px-3 text-xs">
+                          <Pencil className="h-3.5 w-3.5" /> Modifier
+                        </button>
+                        {confirmDeleteKey === `event:${ev.id}` ? (
+                          <button
+                            onClick={async () => {
+                              const res = await api.deleteEvent(ev.id);
+                              onSyncPublicState({ events: res.events });
+                              setConfirmDeleteKey(null);
+                              notify('Événement supprimé.');
+                            }}
+                            className="btn-primary min-h-[38px] bg-red-600 hover:bg-red-700 px-3 text-xs"
+                          >
+                            Confirmer
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmDeleteKey(`event:${ev.id}`)}
+                            className="btn-secondary min-h-[38px] px-3 text-xs text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {(isFullFormView || wizardStep === 5) && (
-              <div className="space-y-4 p-4 rounded-xl bg-church-light border border-slate-200/80">
-                <h3 className="font-heading font-bold text-sm text-church-navy flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-church-navy text-white text-xs flex items-center justify-center">5</span>
-                  <span>Mode de Diffusion</span>
-                </h3>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <label className={`p-3.5 rounded-xl border cursor-pointer text-left transition-all ${
-                    serviceForm.status === 'publie' ? 'bg-emerald-50 border-emerald-500' : 'bg-white border-slate-200'
-                  }`}>
-                    <input
-                      type="radio"
-                      name="status"
-                      checked={serviceForm.status === 'publie'}
-                      onChange={() => setServiceForm({ ...serviceForm, status: 'publie' })}
-                      className="hidden"
-                    />
-                    <span className="font-bold text-xs block mb-1">🚀 Publication Immédiate</span>
-                    <span className="text-[11px] text-slate-500">Visible directement sur le site.</span>
-                  </label>
-
-                  <label className={`p-3.5 rounded-xl border cursor-pointer text-left transition-all ${
-                    serviceForm.status === 'programme' ? 'bg-amber-50 border-amber-500' : 'bg-white border-slate-200'
-                  }`}>
-                    <input
-                      type="radio"
-                      name="status"
-                      checked={serviceForm.status === 'programme'}
-                      onChange={() => setServiceForm({ ...serviceForm, status: 'programme' })}
-                      className="hidden"
-                    />
-                    <span className="font-bold text-xs block mb-1">⏰ Programmer</span>
-                    <span className="text-[11px] text-slate-500">Mise en ligne automatique.</span>
-                  </label>
-
-                  <label className={`p-3.5 rounded-xl border cursor-pointer text-left transition-all ${
-                    serviceForm.status === 'brouillon' ? 'bg-slate-200 border-slate-400' : 'bg-white border-slate-200'
-                  }`}>
-                    <input
-                      type="radio"
-                      name="status"
-                      checked={serviceForm.status === 'brouillon'}
-                      onChange={() => setServiceForm({ ...serviceForm, status: 'brouillon' })}
-                      className="hidden"
-                    />
-                    <span className="font-bold text-xs block mb-1">📝 Brouillon</span>
-                    <span className="text-[11px] text-slate-500">Sauvegardé sans publication.</span>
-                  </label>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-            {!isFullFormView && wizardStep > 1 ? (
-              <button
-                type="button"
-                onClick={() => setWizardStep(wizardStep - 1)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Précédent</span>
-              </button>
-            ) : <div />}
-
-            <div className="flex items-center gap-2">
-              {!isFullFormView && wizardStep < 5 ? (
-                <button
-                  type="button"
-                  onClick={() => setWizardStep(wizardStep + 1)}
-                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-church-navy text-white text-xs font-semibold hover:bg-church-blue"
-                >
-                  <span>Suivant</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handlePublishCulte}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#2854A6] hover:bg-[#1f4489] text-white text-xs font-bold transition-all shadow-sm"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Enregistrer et appliquer</span>
-                </button>
               )}
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* 4. SUBPAGE: ÉVÉNEMENTS & AGENDA */}
-      {activeSubPage === 'evenements' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-7 shadow-xs space-y-5">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <h3 className="font-heading font-bold text-base text-[#173567]">
-                Gestion des Événements & Veillées
-              </h3>
-              <p className="text-xs text-slate-500">
-                {events.length} programmes au calendrier
-              </p>
-            </div>
-            <button
-              onClick={() => onNavigateSubPage('evenements-creer')}
-              className="px-4 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489] transition-colors flex items-center gap-1.5"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Nouvel Événement</span>
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {events.map((ev) => (
-              <div
-                key={ev.id}
-                className="p-4 rounded-xl border border-slate-200/80 bg-church-light flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-church-navy text-sm">
-                      {ev.title}
-                    </span>
-                    <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-semibold text-[10px]">
-                      {ev.category}
-                    </span>
-                  </div>
-                  <div className="text-slate-500">
-                    {ev.date} · {ev.time} · {ev.location}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-600 font-medium mr-1">
-                    {ev.attendeesCount} inscrits · 👍 {ev.likes || 0}
-                  </span>
-
-                  <button
-                    onClick={() => setEditingEvent(ev)}
-                    className="px-2.5 py-1.5 rounded-lg border border-[#2854A6]/30 text-[#2854A6] bg-blue-50/50 hover:bg-blue-100/50 text-xs font-semibold flex items-center gap-1 transition-colors"
-                    title="Modifier et rectifier cet événement"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    <span>Modifier</span>
-                  </button>
-
-                  {onDeleteEvent && (
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Supprimer l'événement « ${ev.title} » ?`)) {
-                          onDeleteEvent(ev.id);
-                          showNotification(`L'événement « ${ev.title} » a été supprimé.`);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition-colors"
-                      title="Supprimer cet événement"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Modal / Formulaire de modification d'un événement existant */}
-          {editingEvent && (
-            <div className="p-6 bg-[#F4F6F9] rounded-2xl border-2 border-[#2854A6] space-y-4 shadow-sm animate-in fade-in">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <div className="flex items-center gap-2">
-                  <Edit className="w-4 h-4 text-[#2854A6]" />
-                  <h4 className="font-heading font-bold text-base text-[#173567]">
-                    Modifier & Rectifier l'Événement : « {editingEvent.title} »
-                  </h4>
-                </div>
-                <button
-                  onClick={() => setEditingEvent(null)}
-                  className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 hover:bg-white"
-                >
-                  ✕ Fermer
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Titre de l'événement</label>
-                  <input
-                    type="text"
-                    value={editingEvent.title}
-                    onChange={(e) => setEditingEvent({ ...editingEvent, title: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Catégorie</label>
-                  <select
-                    value={editingEvent.category}
-                    onChange={(e) => setEditingEvent({ ...editingEvent, category: e.target.value as any })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  >
-                    <option value="Prière">Prière</option>
-                    <option value="Jeunesse">Jeunesse</option>
-                    <option value="Femmes">Femmes</option>
-                    <option value="Évangélisation">Évangélisation</option>
-                    <option value="Culte spécial">Culte spécial</option>
-                    <option value="Conférence">Conférence</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Date</label>
-                  <input
-                    type="text"
-                    value={editingEvent.date}
-                    onChange={(e) => setEditingEvent({ ...editingEvent, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Horaire</label>
-                  <input
-                    type="text"
-                    value={editingEvent.time}
-                    onChange={(e) => setEditingEvent({ ...editingEvent, time: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Lieu</label>
-                  <input
-                    type="text"
-                    value={editingEvent.location}
-                    onChange={(e) => setEditingEvent({ ...editingEvent, location: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Orateur / Responsable</label>
-                  <input
-                    type="text"
-                    value={editingEvent.speaker || ''}
-                    onChange={(e) => setEditingEvent({ ...editingEvent, speaker: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Description du programme</label>
-                  <textarea
-                    rows={3}
-                    value={editingEvent.description}
-                    onChange={(e) => setEditingEvent({ ...editingEvent, description: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Affiche officielle / Poster de l'événement
-                  </label>
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-white rounded-xl border border-slate-200">
-                    <img
-                      src={editingEvent.coverImage}
-                      alt="Aperçu affiche"
-                      className="w-24 h-16 object-cover rounded-lg border border-slate-200 shrink-0"
-                    />
-                    <div className="space-y-1.5 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="px-3 py-1.5 rounded-lg bg-[#2854A6] text-white font-semibold text-xs cursor-pointer hover:bg-[#1f4489] transition-colors inline-flex items-center gap-1.5 shadow-xs">
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Importer une nouvelle affiche</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) =>
-                              handleImageFileUpload(e, (url) => setEditingEvent({ ...editingEvent, coverImage: url }))
-                            }
-                            className="hidden"
-                          />
-                        </label>
-                        <span className="text-[11px] text-slate-500">ou modifier le lien :</span>
-                      </div>
-                      <input
-                        type="text"
-                        value={editingEvent.coverImage}
-                        onChange={(e) => setEditingEvent({ ...editingEvent, coverImage: e.target.value })}
-                        placeholder="ou lien direct..."
-                        className="w-full px-2.5 py-1 text-xs border border-slate-200 rounded"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setEditingEvent(null)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-white"
-                >
+          {/* ==================== CREER / MODIFIER ÉVÉNEMENT ==================== */}
+          {activeSubPage === 'evenements-creer' && editingEvent && (
+            <form onSubmit={handleSaveEvent} className="surface p-5 sm:p-7 space-y-5">
+              <div className="flex items-center justify-between border-b border-church-line pb-4">
+                <h2 className="text-2xl">{events.some((e) => e.id === editingEvent.id) ? 'Modifier l’événement' : 'Nouvel événement'}</h2>
+                <button type="button" onClick={() => onNavigateSubPage('evenements')} className="btn-ghost text-sm">
                   Annuler
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onUpdateEvent) {
-                      onUpdateEvent(editingEvent);
-                    }
-                    setEditingEvent(null);
-                    showNotification(`L'événement « ${editingEvent.title} » a été mis à jour avec son affiche.`);
-                  }}
-                  className="px-5 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489]"
-                >
-                  Enregistrer les modifications
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Titre de l’événement *</label>
+                  <input
+                    required
+                    value={editingEvent.title}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, title: e.target.value })}
+                    className="field"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Catégorie</label>
+                  <select
+                    value={editingEvent.category}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, category: e.target.value as EventItem['category'] })}
+                    className="field"
+                  >
+                    <option value="Culte spécial">Culte spécial</option>
+                    <option value="Conférence">Conférence</option>
+                    <option value="Jeunesse">Jeunesse</option>
+                    <option value="Prière">Prière</option>
+                    <option value="Femmes">Femmes</option>
+                    <option value="Évangélisation">Évangélisation</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Date *</label>
+                  <input
+                    type="date"
+                    required
+                    value={editingEvent.date}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, date: e.target.value })}
+                    className="field"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Horaire</label>
+                  <input
+                    value={editingEvent.time}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, time: e.target.value })}
+                    placeholder="Ex. 18h00 - 20h30"
+                    className="field"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Lieu</label>
+                  <input
+                    value={editingEvent.location}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, location: e.target.value })}
+                    className="field"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Orateur / Intervenant (optionnel)</label>
+                  <input
+                    value={editingEvent.speaker || ''}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, speaker: e.target.value })}
+                    className="field"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-church-navy">Description & Programme</label>
+                <textarea
+                  rows={4}
+                  value={editingEvent.description}
+                  onChange={(e) => setEditingEvent({ ...editingEvent, description: e.target.value })}
+                  className="field py-2.5 min-h-[100px]"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-church-line p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-lg">Médias de l’événement (Affiche, Photos, Vidéos, Audios & Google Drive)</h3>
+                    <p className="text-xs text-church-muted">
+                      Importez depuis votre appareil ou via Google Drive (document entier ou regroupement entier / au choix).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowEventDrivePicker((v) => !v)}
+                    className="btn-secondary min-h-[38px] text-xs"
+                  >
+                    <HardDrive className="h-3.5 w-3.5 text-church-blue" />
+                    {showEventDrivePicker ? 'Masquer Google Drive' : 'Importer depuis Google Drive'}
+                  </button>
+                </div>
+
+                {showEventDrivePicker && (
+                  <GoogleDriveBrowser
+                    compact
+                    allowDocuments
+                    linkedAccounts={driveAccounts}
+                    linkedFolders={driveFolders}
+                    defaultCategory="Événements"
+                    onSyncDriveState={(patch) => {
+                      onSyncDriveState(patch);
+                      if (patch.albums) onSyncPublicState({ albums: patch.albums });
+                    }}
+                    onImportedToForm={(items, docs) => {
+                      const importedPhotos = items.filter((it) => it.type === 'photo');
+                      const importedVideos = items.filter((it) => it.type === 'video');
+                      const importedAudios = items.filter((it) => it.type === 'audio');
+                      const importedDocs = docs || [];
+                      setEditingEvent((prev) => {
+                        if (!prev) return prev;
+                        let nextVideoUrl = prev.videoUrl || '';
+                        const extraVideos: MediaItem[] = [];
+                        importedVideos.forEach((v) => {
+                          if (!nextVideoUrl) nextVideoUrl = v.url;
+                          else extraVideos.push(v);
+                        });
+                        let nextAudioUrl = prev.audioUrl || '';
+                        const extraAudios: MediaItem[] = [];
+                        importedAudios.forEach((a) => {
+                          if (!nextAudioUrl) nextAudioUrl = a.url;
+                          else extraAudios.push(a);
+                        });
+                        return {
+                          ...prev,
+                          coverImage: prev.coverImage || importedPhotos[0]?.url || '',
+                          videoUrl: nextVideoUrl,
+                          audioUrl: nextAudioUrl,
+                          mediaItems: [...(prev.mediaItems || []), ...importedPhotos, ...extraVideos, ...extraAudios],
+                          documents: [...(prev.documents || []), ...importedDocs]
+                        };
+                      });
+                    }}
+                    onNotify={notify}
+                  />
+                )}
+
+                {editingEvent.coverImage && (
+                  <div className="relative inline-block">
+                    <img src={sanitizeUrl(editingEvent.coverImage)} alt="" className="h-36 rounded-xl border border-church-line object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setEditingEvent({ ...editingEvent, coverImage: '' })}
+                      className="absolute right-1.5 top-1.5 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
+                      aria-label="Retirer l'affiche"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold text-church-muted">Affiche principale</p>
+                    <MediaBatchUploader
+                      mode="single-image"
+                      label="Importer l’affiche de l’événement"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setEditingEvent((prev) => (prev ? { ...prev, coverImage: res[0].url } : prev));
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold text-church-muted">Photos complémentaires (lot ou dossier)</p>
+                    <MediaBatchUploader
+                      mode="photos"
+                      label="Ajouter plusieurs photos"
+                      onUploadedFiles={(res) => {
+                        const added: MediaItem[] = res.map((r, i) => ({
+                          id: `evt-img-${Date.now()}-${i}`,
+                          type: 'photo',
+                          url: r.url,
+                          caption: r.name
+                        }));
+                        setEditingEvent((prev) =>
+                          prev ? { ...prev, mediaItems: [...(prev.mediaItems || []), ...added] } : prev
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-4 border-t border-church-line pt-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-church-muted">Vidéo (YouTube ou fichier MP4)</label>
+                    <input
+                      value={editingEvent.videoUrl || ''}
+                      onChange={(e) => setEditingEvent({ ...editingEvent, videoUrl: e.target.value })}
+                      placeholder="Lien YouTube ou /uploads/video.mp4"
+                      className="field text-sm"
+                    />
+                    <MediaBatchUploader
+                      mode="video"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setEditingEvent((prev) => (prev ? { ...prev, videoUrl: res[0].url } : prev));
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-church-muted">Audio (MP3, WAV, M4A)</label>
+                    <input
+                      value={editingEvent.audioUrl || ''}
+                      onChange={(e) => setEditingEvent({ ...editingEvent, audioUrl: e.target.value })}
+                      placeholder="Lien audio (/uploads/... ou https://)"
+                      className="field text-sm"
+                    />
+                    <MediaBatchUploader
+                      mode="audio"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setEditingEvent((prev) => (prev ? { ...prev, audioUrl: res[0].url } : prev));
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {(editingEvent.mediaItems || []).length > 0 && (
+                  <div className="space-y-2 border-t border-church-line pt-3">
+                    <p className="text-xs font-semibold text-church-navy">
+                      Galerie médias de l’événement ({editingEvent.mediaItems!.length})
+                    </p>
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                      {editingEvent.mediaItems!.map((m, idx) => (
+                        <div key={m.id || idx} className="relative rounded-xl border border-church-line p-1.5">
+                          {m.type === 'photo' ? (
+                            <img src={sanitizeUrl(m.url)} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+                          ) : (
+                            <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 rounded-lg bg-church-navy px-2 text-center text-xs text-white">
+                              {m.type === 'video' ? <Film className="h-5 w-5" /> : <Headphones className="h-5 w-5" />}
+                              <span className="line-clamp-2">{m.caption || (m.type === 'video' ? 'Vidéo' : 'Audio')}</span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingEvent({
+                                ...editingEvent,
+                                mediaItems: (editingEvent.mediaItems || []).filter((_, i) => i !== idx)
+                              })
+                            }
+                            className="absolute right-2 top-2 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
+                            aria-label="Retirer ce média"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-church-line p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-lg">Documents associés (programme PDF, dépliant, dossier...)</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowEventDrivePicker(true)}
+                    className="btn-secondary min-h-[36px] text-xs"
+                  >
+                    <HardDrive className="h-3.5 w-3.5 text-church-blue" />
+                    Document entier depuis Drive
+                  </button>
+                </div>
+                <MediaBatchUploader
+                  mode="documents"
+                  onUploadedFiles={() => {}}
+                  onUploadedDocuments={(docs) =>
+                    setEditingEvent((prev) =>
+                      prev ? { ...prev, documents: [...(prev.documents || []), ...docs] } : prev
+                    )
+                  }
+                />
+                {(editingEvent.documents || []).length > 0 && (
+                  <ul className="divide-y divide-church-line rounded-xl border border-church-line">
+                    {editingEvent.documents!.map((d, i) => (
+                      <li key={i} className="flex items-center justify-between px-3 py-2 text-sm">
+                        <span className="flex items-center gap-2 truncate">
+                          <FileText className="h-4 w-4 text-church-blue shrink-0" />
+                          {d.title} {d.fileSize && <span className="text-xs text-church-muted">({d.fileSize})</span>}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingEvent({
+                              ...editingEvent,
+                              documents: (editingEvent.documents || []).filter((_, idx) => idx !== i)
+                            })
+                          }
+                          className="text-xs text-red-700 hover:underline"
+                        >
+                          Retirer
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-church-line p-4 space-y-3">
+                <label className="flex items-center gap-2.5 text-sm font-semibold text-church-navy cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={eventPollEnabled}
+                    onChange={(e) => setEventPollEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded accent-church-blue"
+                  />
+                  Ajouter un sondage de participation (« Qui sera présent ? »)
+                </label>
+                {eventPollEnabled && (
+                  <div className="space-y-3 pt-2">
+                    <input
+                      value={eventPollQuestion}
+                      onChange={(e) => setEventPollQuestion(e.target.value)}
+                      placeholder="Question du sondage"
+                      className="field text-sm"
+                    />
+                    <textarea
+                      rows={3}
+                      value={eventPollOptionsText}
+                      onChange={(e) => setEventPollOptionsText(e.target.value)}
+                      placeholder="Une option par ligne"
+                      className="field py-2 text-sm min-h-[84px]"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => onNavigateSubPage('evenements')} className="btn-secondary">
+                  Annuler
+                </button>
+                <button type="submit" disabled={saving} className="btn-primary">
+                  {saving ? 'Enregistrement...' : 'Enregistrer l’événement'}
                 </button>
               </div>
+            </form>
+          )}
+
+          {/* ==================== LISTE ACTUALITÉS ==================== */}
+          {activeSubPage === 'actualites' && (
+            <div className="surface p-5 sm:p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl">Actualités & Communiqués</h2>
+                  <p className="text-sm text-church-muted">Publiez les communiqués officiels, nouvelles paroissiales et avis.</p>
+                </div>
+                <button onClick={() => openNewsForm()} className="btn-primary">
+                  <Plus className="h-4 w-4" /> Nouvelle actualité
+                </button>
+              </div>
+
+              {news.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-church-line p-8 text-center text-sm text-church-muted">
+                  Aucune actualité publiée pour le moment.
+                </div>
+              ) : (
+                <div className="divide-y divide-church-line">
+                  {news.map((n) => (
+                    <div key={n.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-church-blue">
+                          {n.category} · {formatPublishedDateTime(n.date, n.publishedAt)}
+                        </span>
+                        <h3 className="font-serif text-lg text-church-navy truncate">{n.title}</h3>
+                        <p className="text-xs text-church-muted">
+                          {n.readsCount || 0} vue(s) · {n.likes || 0} j’aime · {(n.comments || []).length} commentaire(s)
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={() => openNewsForm(n)} className="btn-secondary min-h-[38px] px-3 text-xs">
+                          <Pencil className="h-3.5 w-3.5" /> Modifier
+                        </button>
+                        {confirmDeleteKey === `news:${n.id}` ? (
+                          <button
+                            onClick={async () => {
+                              const res = await api.deleteNews(n.id);
+                              onSyncPublicState({ news: res.news });
+                              setConfirmDeleteKey(null);
+                              notify('Actualité supprimée.');
+                            }}
+                            className="btn-primary min-h-[38px] bg-red-600 hover:bg-red-700 px-3 text-xs"
+                          >
+                            Confirmer
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmDeleteKey(`news:${n.id}`)}
+                            className="btn-secondary min-h-[38px] px-3 text-xs text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-        </div>
-      )}
 
-      {/* 5. SUBPAGE: CRÉATION D'ÉVÉNEMENT */}
-      {activeSubPage === 'evenements-creer' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-7 space-y-6">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-                <button
-                  onClick={() => onNavigateSubPage('evenements')}
-                  className="hover:text-church-navy text-slate-600 font-medium"
-                >
-                  Événements
-                </button>
-                <span>/</span>
-                <span>Nouveau</span>
-              </div>
-              <h2 className="font-heading font-bold text-xl text-church-navy">
-                Créer un Événement ou une Veillée
-              </h2>
-            </div>
-          </div>
-
-          <form onSubmit={handlePublishEvent} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Titre de l'événement
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="ex: Grande Nuit de Prière et Traversée"
-                  value={eventForm.title}
-                  onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Catégorie
-                </label>
-                <select
-                  value={eventForm.category}
-                  onChange={(e) => setEventForm({ ...eventForm, category: e.target.value as any })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none"
-                >
-                  <option value="Prière">Prière</option>
-                  <option value="Jeunesse">Jeunesse</option>
-                  <option value="Femmes">Femmes</option>
-                  <option value="Évangélisation">Évangélisation</option>
-                  <option value="Culte spécial">Culte spécial</option>
-                  <option value="Conférence">Conférence</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Date
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={eventForm.date}
-                  onChange={(e) => setEventForm({ ...eventForm, date: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Horaire
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={eventForm.time}
-                  onChange={(e) => setEventForm({ ...eventForm, time: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Lieu à Anyama
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={eventForm.location}
-                  onChange={(e) => setEventForm({ ...eventForm, location: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Orateur invité
-                </label>
-                <input
-                  type="text"
-                  value={eventForm.speaker}
-                  onChange={(e) => setEventForm({ ...eventForm, speaker: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Description détaillée
-              </label>
-              <textarea
-                rows={3}
-                required
-                value={eventForm.description}
-                onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Affiche officielle / Poster de l'événement
-              </label>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                <img
-                  src={eventForm.coverImage}
-                  alt="Aperçu affiche"
-                  className="w-24 h-16 object-cover rounded-lg border border-slate-200 shrink-0"
-                />
-                <div className="space-y-1.5 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="px-3 py-1.5 rounded-lg bg-[#2854A6] text-white font-semibold text-xs cursor-pointer hover:bg-[#1f4489] transition-colors inline-flex items-center gap-1.5 shadow-xs">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Importer l’affiche depuis mon appareil</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) =>
-                          handleImageFileUpload(e, (url) => setEventForm({ ...eventForm, coverImage: url }))
-                        }
-                        className="hidden"
-                      />
-                    </label>
-                    <span className="text-[11px] text-slate-500">ou lien direct :</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={eventForm.coverImage}
-                    onChange={(e) => setEventForm({ ...eventForm, coverImage: e.target.value })}
-                    placeholder="https://..."
-                    className="w-full px-2.5 py-1 text-xs border border-slate-200 rounded bg-white"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => onNavigateSubPage('evenements')}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
-              >
-                Annuler
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489] transition-colors"
-              >
-                Publier l'événement
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* 6. SUBPAGE: ACTUALITÉS & COMMUNOIQUÉS */}
-      {activeSubPage === 'actualites' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-7 shadow-xs space-y-5">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <h3 className="font-heading font-bold text-base text-[#173567]">
-                Actualités & Avis Pastoraux
-              </h3>
-              <p className="text-xs text-slate-500">
-                {news.length} publications actives
-              </p>
-            </div>
-            <button
-              onClick={() => onNavigateSubPage('actualites-creer')}
-              className="px-4 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489] transition-colors flex items-center gap-1.5"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Nouveau Communiqué</span>
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {news.map((item) => (
-              <div
-                key={item.id}
-                className="p-4 rounded-xl border border-slate-200/80 bg-church-light flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-              >
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-church-navy text-sm">
-                      {item.title}
-                    </span>
-                    {item.isUrgent && (
-                      <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-semibold text-[10px]">
-                        Urgent
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-slate-500">
-                    {item.date} · {item.author} ({item.authorRole})
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-500 text-[11px] mr-1">
-                    {item.readsCount} vues · 👍 {item.likes || 0}
-                  </span>
-
-                  <button
-                    onClick={() => setEditingNews(item)}
-                    className="px-2.5 py-1.5 rounded-lg border border-[#2854A6]/30 text-[#2854A6] bg-blue-50/50 hover:bg-blue-100/50 text-xs font-semibold flex items-center gap-1 transition-colors"
-                    title="Modifier et rectifier cette actualité"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    <span>Modifier</span>
-                  </button>
-
-                  {onDeleteNews && (
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Supprimer le communiqué « ${item.title} » ?`)) {
-                          onDeleteNews(item.id);
-                          showNotification(`Le communiqué « ${item.title} » a été supprimé.`);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition-colors"
-                      title="Supprimer ce communiqué"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Modal / Formulaire de modification d'une actualité existante */}
-          {editingNews && (
-            <div className="p-6 bg-[#F4F6F9] rounded-2xl border-2 border-[#2854A6] space-y-4 shadow-sm animate-in fade-in">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <div className="flex items-center gap-2">
-                  <Edit className="w-4 h-4 text-[#2854A6]" />
-                  <h4 className="font-heading font-bold text-base text-[#173567]">
-                    Modifier & Rectifier l'Actualité : « {editingNews.title} »
-                  </h4>
-                </div>
-                <button
-                  onClick={() => setEditingNews(null)}
-                  className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 hover:bg-white"
-                >
-                  ✕ Fermer
+          {/* ==================== CREER / MODIFIER ACTUALITÉ ==================== */}
+          {activeSubPage === 'actualites-creer' && editingNews && (
+            <form onSubmit={handleSaveNews} className="surface p-5 sm:p-7 space-y-5">
+              <div className="flex items-center justify-between border-b border-church-line pb-4">
+                <h2 className="text-2xl">{news.some((n) => n.id === editingNews.id) ? 'Modifier l’actualité' : 'Publier une actualité'}</h2>
+                <button type="button" onClick={() => onNavigateSubPage('actualites')} className="btn-ghost text-sm">
+                  Annuler
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Titre de l'actualité</label>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Titre *</label>
                   <input
-                    type="text"
+                    required
                     value={editingNews.title}
                     onChange={(e) => setEditingNews({ ...editingNews, title: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    className="field"
                   />
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Catégorie</label>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Catégorie</label>
                   <select
                     value={editingNews.category}
-                    onChange={(e) => setEditingNews({ ...editingNews, category: e.target.value as any })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    onChange={(e) => setEditingNews({ ...editingNews, category: e.target.value as NewsItem['category'] })}
+                    className="field"
                   >
                     <option value="Communiqué officiel">Communiqué officiel</option>
                     <option value="Vie de l’église">Vie de l’église</option>
                     <option value="Avis de décès">Avis de décès</option>
-                    <option value="Événement">Événement</option>
                   </select>
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Date</label>
-                  <input
-                    type="text"
-                    value={editingNews.date}
-                    onChange={(e) => setEditingNews({ ...editingNews, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Horodatage de publication</label>
+                  <div className="flex min-h-[44px] items-center gap-2 rounded-[var(--radius-control)] border border-church-line bg-church-light/70 px-3.5 text-sm text-church-navy">
+                    <Clock className="h-4 w-4 shrink-0 text-church-blue" />
+                    <span>
+                      {editingNews.publishedAt
+                        ? formatPublishedDateTime(editingNews.date, editingNews.publishedAt)
+                        : 'Date et heure définies automatiquement à l’envoi'}
+                    </span>
+                  </div>
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Auteur / Émetteur</label>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Auteur / Signataire</label>
                   <input
-                    type="text"
                     value={editingNews.author}
                     onChange={(e) => setEditingNews({ ...editingNews, author: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                    className="field"
                   />
                 </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Rôle de l'auteur</label>
-                  <input
-                    type="text"
-                    value={editingNews.authorRole}
-                    onChange={(e) => setEditingNews({ ...editingNews, authorRole: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Résumé d'introduction</label>
-                  <textarea
-                    rows={2}
-                    value={editingNews.summary}
-                    onChange={(e) => setEditingNews({ ...editingNews, summary: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Texte intégral officiel</label>
-                  <textarea
-                    rows={5}
-                    value={editingNews.fullContent}
-                    onChange={(e) => setEditingNews({ ...editingNews, fullContent: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Photo d'illustration / Affiche du communiqué
-                  </label>
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-white rounded-xl border border-slate-200">
-                    <img
-                      src={editingNews.coverImage || HERO_IMAGE}
-                      alt="Aperçu photo"
-                      className="w-24 h-16 object-cover rounded-lg border border-slate-200 shrink-0"
-                    />
-                    <div className="space-y-1.5 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="px-3 py-1.5 rounded-lg bg-[#2854A6] text-white font-semibold text-xs cursor-pointer hover:bg-[#1f4489] transition-colors inline-flex items-center gap-1.5 shadow-xs">
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Importer une nouvelle photo</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) =>
-                              handleImageFileUpload(e, (url) => setEditingNews({ ...editingNews, coverImage: url }))
-                            }
-                            className="hidden"
-                          />
-                        </label>
-                        <span className="text-[11px] text-slate-500">ou modifier le lien :</span>
-                      </div>
-                      <input
-                        type="text"
-                        value={editingNews.coverImage || ''}
-                        onChange={(e) => setEditingNews({ ...editingNews, coverImage: e.target.value })}
-                        placeholder="ou lien direct..."
-                        className="w-full px-2.5 py-1 text-xs border border-slate-200 rounded"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-church-navy cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={editingNews.isUrgent}
+                      checked={Boolean(editingNews.isUrgent)}
                       onChange={(e) => setEditingNews({ ...editingNews, isUrgent: e.target.checked })}
-                      className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                      className="h-4 w-4 accent-church-blue"
                     />
-                    <span>Marquer ce communiqué comme URGENT (badge rouge)</span>
+                    Marquer comme communiqué important
                   </label>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setEditingNews(null)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-white"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onUpdateNews) {
-                      onUpdateNews(editingNews);
-                    }
-                    setEditingNews(null);
-                    showNotification(`Le communiqué « ${editingNews.title} » a été mis à jour avec sa photo.`);
-                  }}
-                  className="px-5 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489]"
-                >
-                  Enregistrer les modifications
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 7. SUBPAGE: CRÉATION DE COMMUNOIQUÉ */}
-      {activeSubPage === 'actualites-creer' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-7 space-y-6">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-                <button
-                  onClick={() => onNavigateSubPage('actualites')}
-                  className="hover:text-church-navy text-slate-600 font-medium"
-                >
-                  Actualités
-                </button>
-                <span>/</span>
-                <span>Nouveau</span>
-              </div>
-              <h2 className="font-heading font-bold text-xl text-church-navy">
-                Rédiger un Communiqué Pastoral
-              </h2>
-            </div>
-          </div>
-
-          <form onSubmit={handlePublishNews} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Titre du communiqué
-              </label>
-              <input
-                type="text"
-                required
-                value={newsForm.title}
-                onChange={(e) => setNewsForm({ ...newsForm, title: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Catégorie
-                </label>
-                <select
-                  value={newsForm.category}
-                  onChange={(e) => setNewsForm({ ...newsForm, category: e.target.value as any })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
-                >
-                  <option value="Communiqué officiel">Communiqué officiel</option>
-                  <option value="Vie de l’église">Vie de l’église</option>
-                  <option value="Événement">Événement</option>
-                </select>
+                <label className="mb-1 block text-sm font-medium text-church-navy">Résumé</label>
+                <textarea
+                  rows={2}
+                  value={editingNews.summary}
+                  onChange={(e) => setEditingNews({ ...editingNews, summary: e.target.value })}
+                  className="field py-2.5 min-h-[70px]"
+                />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Auteur / Émetteur
-                </label>
-                <input
-                  type="text"
-                  value={newsForm.author}
-                  onChange={(e) => setNewsForm({ ...newsForm, author: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
+                <label className="mb-1 block text-sm font-medium text-church-navy">Contenu complet *</label>
+                <textarea
+                  required
+                  rows={5}
+                  value={editingNews.fullContent}
+                  onChange={(e) => setEditingNews({ ...editingNews, fullContent: e.target.value })}
+                  className="field py-2.5 min-h-[130px]"
                 />
               </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Résumé d'introduction (1-2 phrases)
-              </label>
-              <textarea
-                rows={2}
-                required
-                value={newsForm.summary}
-                onChange={(e) => setNewsForm({ ...newsForm, summary: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Texte intégral officiel
-              </label>
-              <textarea
-                rows={5}
-                required
-                value={newsForm.fullContent}
-                onChange={(e) => setNewsForm({ ...newsForm, fullContent: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Photo d'illustration / Affiche du communiqué
-              </label>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                <img
-                  src={newsForm.coverImage}
-                  alt="Aperçu photo"
-                  className="w-24 h-16 object-cover rounded-lg border border-slate-200 shrink-0"
-                />
-                <div className="space-y-1.5 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="px-3 py-1.5 rounded-lg bg-[#2854A6] text-white font-semibold text-xs cursor-pointer hover:bg-[#1f4489] transition-colors inline-flex items-center gap-1.5 shadow-xs">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Importer une photo depuis mon appareil</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) =>
-                          handleImageFileUpload(e, (url) => setNewsForm({ ...newsForm, coverImage: url }))
-                        }
-                        className="hidden"
-                      />
-                    </label>
-                    <span className="text-[11px] text-slate-500">ou lien direct :</span>
+              <div className="rounded-2xl border border-church-line p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-lg">Médias & Documents joints (Photos, Vidéos, Audios, PDF & Google Drive)</h3>
+                    <p className="text-xs text-church-muted">
+                      Importez depuis votre appareil ou via Google Drive (document entier ou regroupement entier / au choix).
+                    </p>
                   </div>
-                  <input
-                    type="text"
-                    value={newsForm.coverImage}
-                    onChange={(e) => setNewsForm({ ...newsForm, coverImage: e.target.value })}
-                    placeholder="https://..."
-                    className="w-full px-2.5 py-1 text-xs border border-slate-200 rounded bg-white"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewsDrivePicker((v) => !v)}
+                    className="btn-secondary min-h-[38px] text-xs"
+                  >
+                    <HardDrive className="h-3.5 w-3.5 text-church-blue" />
+                    {showNewsDrivePicker ? 'Masquer Google Drive' : 'Importer depuis Google Drive'}
+                  </button>
                 </div>
-              </div>
-            </div>
 
-            <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={newsForm.isUrgent}
-                onChange={(e) => setNewsForm({ ...newsForm, isUrgent: e.target.checked })}
-                className="rounded text-rose-600 focus:ring-rose-500"
-              />
-              <span className="font-semibold text-rose-800">Marquer comme communiqué urgent</span>
-            </label>
+                {showNewsDrivePicker && (
+                  <GoogleDriveBrowser
+                    compact
+                    allowDocuments
+                    linkedAccounts={driveAccounts}
+                    linkedFolders={driveFolders}
+                    defaultCategory="Événements"
+                    onSyncDriveState={(patch) => {
+                      onSyncDriveState(patch);
+                      if (patch.albums) onSyncPublicState({ albums: patch.albums });
+                    }}
+                    onImportedToForm={(items, docs) => {
+                      const importedPhotos = items.filter((it) => it.type === 'photo');
+                      const importedVideos = items.filter((it) => it.type === 'video');
+                      const importedAudios = items.filter((it) => it.type === 'audio');
+                      const importedDocs = docs || [];
+                      setEditingNews((prev) => {
+                        if (!prev) return prev;
+                        let nextVideoUrl = prev.videoUrl || '';
+                        const extraVideos: MediaItem[] = [];
+                        importedVideos.forEach((v) => {
+                          if (!nextVideoUrl) nextVideoUrl = v.url;
+                          else extraVideos.push(v);
+                        });
+                        let nextAudioUrl = prev.audioUrl || '';
+                        const extraAudios: MediaItem[] = [];
+                        importedAudios.forEach((a) => {
+                          if (!nextAudioUrl) nextAudioUrl = a.url;
+                          else extraAudios.push(a);
+                        });
+                        return {
+                          ...prev,
+                          coverImage: prev.coverImage || importedPhotos[0]?.url || '',
+                          videoUrl: nextVideoUrl,
+                          audioUrl: nextAudioUrl,
+                          mediaItems: [...(prev.mediaItems || []), ...importedPhotos, ...extraVideos, ...extraAudios],
+                          documents: [...(prev.documents || []), ...importedDocs]
+                        };
+                      });
+                    }}
+                    onNotify={notify}
+                  />
+                )}
 
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => onNavigateSubPage('actualites')}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
-              >
-                Annuler
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 rounded-xl bg-church-navy text-white text-xs font-semibold hover:bg-church-blue"
-              >
-                Publier le communiqué
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+                {editingNews.coverImage && (
+                  <div className="relative inline-block">
+                    <img src={sanitizeUrl(editingNews.coverImage)} alt="" className="h-36 rounded-xl border border-church-line object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setEditingNews({ ...editingNews, coverImage: '' })}
+                      className="absolute right-1.5 top-1.5 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
+                      aria-label="Retirer l'illustration"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
 
-      {/* 8. SUBPAGE: GALERIE & ALBUMS */}
-      {activeSubPage === 'galerie' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-7 shadow-xs space-y-5">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <h3 className="font-heading font-bold text-base text-[#173567]">
-                Gestion des Albums Photos & Vidéos
-              </h3>
-              <p className="text-xs text-slate-500">
-                {albums.length} albums hébergés
-              </p>
-            </div>
-            <button
-              onClick={() => onNavigateSubPage('galerie-creer')}
-              className="px-4 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489] transition-colors flex items-center gap-1.5"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Nouvel Album</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {albums.map((alb) => (
-              <div key={alb.id} className="p-3.5 rounded-xl border border-slate-200/80 bg-church-light space-y-2 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="relative aspect-video rounded-lg overflow-hidden bg-church-navy">
-                    <img
-                      src={alb.coverImage}
-                      alt={alb.title}
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold text-church-muted">Photo principale</p>
+                    <MediaBatchUploader
+                      mode="single-image"
+                      label="Ajouter une photo d’illustration"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setEditingNews((prev) => (prev ? { ...prev, coverImage: res[0].url } : prev));
+                      }}
                     />
-                    <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">
-                      {alb.category}
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold text-church-muted">Photos complémentaires (lot ou dossier)</p>
+                    <MediaBatchUploader
+                      mode="photos"
+                      label="Ajouter plusieurs photos"
+                      onUploadedFiles={(res) => {
+                        const added: MediaItem[] = res.map((r, i) => ({
+                          id: `news-img-${Date.now()}-${i}`,
+                          type: 'photo',
+                          url: r.url,
+                          caption: r.name
+                        }));
+                        setEditingNews((prev) =>
+                          prev ? { ...prev, mediaItems: [...(prev.mediaItems || []), ...added] } : prev
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-4 border-t border-church-line pt-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-church-muted">Vidéo (YouTube ou fichier MP4)</label>
+                    <input
+                      value={editingNews.videoUrl || ''}
+                      onChange={(e) => setEditingNews({ ...editingNews, videoUrl: e.target.value })}
+                      placeholder="Lien YouTube ou /uploads/video.mp4"
+                      className="field text-sm"
+                    />
+                    <MediaBatchUploader
+                      mode="video"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setEditingNews((prev) => (prev ? { ...prev, videoUrl: res[0].url } : prev));
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-church-muted">Audio (MP3, WAV, M4A)</label>
+                    <input
+                      value={editingNews.audioUrl || ''}
+                      onChange={(e) => setEditingNews({ ...editingNews, audioUrl: e.target.value })}
+                      placeholder="Lien audio (/uploads/... ou https://)"
+                      className="field text-sm"
+                    />
+                    <MediaBatchUploader
+                      mode="audio"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setEditingNews((prev) => (prev ? { ...prev, audioUrl: res[0].url } : prev));
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {(editingNews.mediaItems || []).length > 0 && (
+                  <div className="space-y-2 border-t border-church-line pt-3">
+                    <p className="text-xs font-semibold text-church-navy">
+                      Médias joints à l’actualité ({editingNews.mediaItems!.length})
+                    </p>
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                      {editingNews.mediaItems!.map((m, idx) => (
+                        <div key={m.id || idx} className="relative rounded-xl border border-church-line p-1.5">
+                          {m.type === 'photo' ? (
+                            <img src={sanitizeUrl(m.url)} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+                          ) : (
+                            <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 rounded-lg bg-church-navy px-2 text-center text-xs text-white">
+                              {m.type === 'video' ? <Film className="h-5 w-5" /> : <Headphones className="h-5 w-5" />}
+                              <span className="line-clamp-2">{m.caption || (m.type === 'video' ? 'Vidéo' : 'Audio')}</span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingNews({
+                                ...editingNews,
+                                mediaItems: (editingNews.mediaItems || []).filter((_, i) => i !== idx)
+                              })
+                            }
+                            className="absolute right-2 top-2 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
+                            aria-label="Retirer ce média"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <h4 className="font-semibold text-xs text-church-navy line-clamp-1">
-                    {alb.title}
-                  </h4>
-                  <div className="text-[11px] text-slate-500">
-                    {alb.date} · {alb.mediaCount} fichiers
-                  </div>
-                </div>
+                )}
 
-                <div className="pt-2 border-t border-slate-200/60 flex items-center justify-end gap-2">
-                  <button
-                    onClick={() => setEditingAlbum(alb)}
-                    className="p-1.5 rounded-lg border border-[#2854A6]/30 text-[#2854A6] bg-blue-50/50 hover:bg-blue-100/50 transition-colors text-xs flex items-center gap-1"
-                    title="Modifier cet album"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    <span>Modifier</span>
-                  </button>
-
-                  {onDeleteAlbum && (
+                <div className="space-y-3 border-t border-church-line pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-church-navy">Documents entiers associés (PDF, Word, Slides...)</p>
                     <button
-                      onClick={() => {
-                        if (window.confirm(`Supprimer l'album « ${alb.title} » ?`)) {
-                          onDeleteAlbum(alb.id);
-                          showNotification(`L'album « ${alb.title} » a été supprimé.`);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition-colors text-xs flex items-center gap-1"
-                      title="Supprimer cet album"
+                      type="button"
+                      onClick={() => setShowNewsDrivePicker(true)}
+                      className="btn-secondary min-h-[34px] text-xs"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Supprimer</span>
+                      <HardDrive className="h-3.5 w-3.5 text-church-blue" />
+                      Document entier depuis Drive
                     </button>
+                  </div>
+                  <MediaBatchUploader
+                    mode="documents"
+                    onUploadedFiles={() => {}}
+                    onUploadedDocuments={(docs) =>
+                      setEditingNews((prev) =>
+                        prev ? { ...prev, documents: [...(prev.documents || []), ...docs] } : prev
+                      )
+                    }
+                  />
+                  {(editingNews.documents || []).length > 0 && (
+                    <ul className="divide-y divide-church-line rounded-xl border border-church-line">
+                      {editingNews.documents!.map((d, i) => (
+                        <li key={i} className="flex items-center justify-between px-3 py-2 text-sm">
+                          <span className="flex items-center gap-2 truncate">
+                            <FileText className="h-4 w-4 text-church-blue shrink-0" />
+                            {d.title} {d.fileSize && <span className="text-xs text-church-muted">({d.fileSize})</span>}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingNews({
+                                ...editingNews,
+                                documents: (editingNews.documents || []).filter((_, idx) => idx !== i)
+                              })
+                            }
+                            className="text-xs text-red-700 hover:underline"
+                          >
+                            Retirer
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
               </div>
-            ))}
-          </div>
 
-          {/* Modal / Formulaire de modification d'album */}
-          {editingAlbum && (
-            <div className="p-6 bg-[#F4F6F9] rounded-2xl border-2 border-[#2854A6] space-y-4 shadow-sm animate-in fade-in">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <div className="flex items-center gap-2">
-                  <Edit className="w-4 h-4 text-[#2854A6]" />
-                  <h4 className="font-heading font-bold text-base text-[#173567]">
-                    Modifier & Rectifier l'Album : « {editingAlbum.title} »
-                  </h4>
-                </div>
-                <button
-                  onClick={() => setEditingAlbum(null)}
-                  className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 hover:bg-white"
-                >
-                  ✕ Fermer
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Titre de l'album</label>
-                  <input
-                    type="text"
-                    value={editingAlbum.title}
-                    onChange={(e) => setEditingAlbum({ ...editingAlbum, title: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Catégorie</label>
-                  <select
-                    value={editingAlbum.category}
-                    onChange={(e) => setEditingAlbum({ ...editingAlbum, category: e.target.value as any })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  >
-                    <option value="Cultes">Cultes</option>
-                    <option value="Jeunesse">Jeunesse</option>
-                    <option value="Événements">Événements</option>
-                    <option value="Chorale & Louange">Chorale & Louange</option>
-                    <option value="Femmes MIFA">Femmes MIFA</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Type de médias</label>
-                  <select
-                    value={editingAlbum.type}
-                    onChange={(e) => setEditingAlbum({ ...editingAlbum, type: e.target.value as any })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  >
-                    <option value="photo">Photos uniquement</option>
-                    <option value="video">Vidéos uniquement</option>
-                    <option value="mixte">Mixte (Photos & Vidéos)</option>
-                  </select>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Description de l'album</label>
-                  <textarea
-                    rows={3}
-                    value={editingAlbum.description}
-                    onChange={(e) => setEditingAlbum({ ...editingAlbum, description: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">Image de couverture de l'album</label>
-                  <div className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200">
-                    <img
-                      src={editingAlbum.coverImage}
-                      alt="Aperçu album"
-                      className="w-24 h-16 object-cover rounded-lg border border-slate-200 shrink-0"
-                    />
-                    <div className="space-y-1.5 flex-1">
-                      <label className="px-3 py-1.5 rounded-lg bg-[#2854A6] text-white font-semibold text-xs cursor-pointer hover:bg-[#1f4489] transition-colors inline-flex items-center gap-1.5 shadow-xs">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Importer une nouvelle couverture</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) =>
-                            handleImageFileUpload(e, (url) => setEditingAlbum({ ...editingAlbum, coverImage: url }))
-                          }
-                          className="hidden"
-                        />
-                      </label>
-                      <input
-                        type="text"
-                        value={editingAlbum.coverImage}
-                        onChange={(e) => setEditingAlbum({ ...editingAlbum, coverImage: e.target.value })}
-                        placeholder="ou lien direct..."
-                        className="w-full px-2.5 py-1 text-xs border border-slate-200 rounded"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setEditingAlbum(null)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-white"
-                >
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => onNavigateSubPage('actualites')} className="btn-secondary">
                   Annuler
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onUpdateAlbum) {
-                      onUpdateAlbum(editingAlbum);
-                    }
-                    setEditingAlbum(null);
-                    showNotification(`L'album « ${editingAlbum.title} » a été mis à jour.`);
-                  }}
-                  className="px-5 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489]"
-                >
-                  Enregistrer les modifications
+                <button type="submit" disabled={saving} className="btn-primary">
+                  {saving ? 'Enregistrement...' : 'Publier l’actualité'}
                 </button>
               </div>
-            </div>
+            </form>
           )}
-        </div>
-      )}
 
-      {/* SUBPAGE: CRÉATION D'ALBUM GALERIE */}
-      {activeSubPage === 'galerie-creer' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-7 space-y-6">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-                <button
-                  onClick={() => onNavigateSubPage('galerie')}
-                  className="hover:text-church-navy text-slate-600 font-medium"
-                >
-                  Galerie
-                </button>
-                <span>/</span>
-                <span>Nouvel Album</span>
-              </div>
-              <h2 className="font-heading font-bold text-xl text-church-navy">
-                Créer un Nouvel Album Photos & Vidéos
-              </h2>
-            </div>
-          </div>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!albumForm.title.trim()) return;
-              const newAlb: AlbumItem = {
-                id: `alb-${Date.now()}`,
-                title: albumForm.title,
-                category: albumForm.category,
-                type: albumForm.type,
-                date: albumForm.date,
-                coverImage: albumForm.coverImage,
-                mediaCount: simulatedFiles.length || 6,
-                description: albumForm.description,
-                items: [
-                  { id: `m-${Date.now()}-1`, type: 'photo', url: albumForm.coverImage, caption: albumForm.title }
-                ],
-                isDemo: false
-              };
-              onAddNewAlbum(newAlb);
-              showNotification(`L'album « ${albumForm.title} » a été créé avec succès.`);
-              onNavigateSubPage('galerie');
-            }}
-            className="space-y-4"
-          >
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Titre de l'album
-              </label>
-              <input
-                type="text"
-                required
-                value={albumForm.title}
-                onChange={(e) => setAlbumForm({ ...albumForm, title: e.target.value })}
-                placeholder="Ex : Culte d’action de grâces..."
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2854A6]"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Catégorie
-                </label>
-                <select
-                  value={albumForm.category}
-                  onChange={(e) => setAlbumForm({ ...albumForm, category: e.target.value as any })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
-                >
-                  <option value="Cultes">Cultes</option>
-                  <option value="Jeunesse">Jeunesse</option>
-                  <option value="Événements">Événements</option>
-                  <option value="Chorale & Louange">Chorale & Louange</option>
-                  <option value="Femmes MIFA">Femmes MIFA</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Type de médias
-                </label>
-                <select
-                  value={albumForm.type}
-                  onChange={(e) => setAlbumForm({ ...albumForm, type: e.target.value as any })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
-                >
-                  <option value="photo">Photos uniquement</option>
-                  <option value="video">Vidéos uniquement</option>
-                  <option value="mixte">Mixte (Photos & Vidéos)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Date de l'événement
-                </label>
-                <input
-                  type="text"
-                  value={albumForm.date}
-                  onChange={(e) => setAlbumForm({ ...albumForm, date: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Description de l'album
-              </label>
-              <textarea
-                rows={3}
-                value={albumForm.description}
-                onChange={(e) => setAlbumForm({ ...albumForm, description: e.target.value })}
-                placeholder="Quelques phrases pour situer les photos ou vidéos prises..."
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => onNavigateSubPage('galerie')}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
-              >
-                Annuler
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489]"
-              >
-                Créer et publier l'album
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* 9. SUBPAGE: DÉPARTEMENTS ET STRUCTURES LOCALES */}
-      {activeSubPage === 'departements' && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-7 shadow-xs space-y-5">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <h3 className="font-heading font-bold text-base text-church-navy">
-                Gestion des Départements et Groupes Locaux
-              </h3>
-              <p className="text-xs text-slate-500">
-                Modification des intitulés officiels, des responsables et confirmation des noms provisoires.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {departments.map((dept) => (
-              <div
-                key={dept.id}
-                className="p-4 rounded-xl border border-slate-200/80 bg-church-light flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-              >
+          {/* ==================== LISTE GALERIE ==================== */}
+          {activeSubPage === 'galerie' && (
+            <div className="surface p-5 sm:p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-slate-200 text-church-navy font-bold text-[10px]">
-                      {dept.code}
-                    </span>
-                    <span className="font-bold text-church-navy text-sm">
-                      {dept.name}
-                    </span>
-                    {!dept.isNameConfirmed && (
-                      <span className="px-2 py-0.5 rounded bg-amber-200 text-amber-900 text-[10px] font-semibold">
-                        À confirmer
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-slate-500 mt-1">
-                    Leader : <strong>{dept.leader}</strong> ({dept.leaderRole}) · {dept.meetingSchedule}
-                  </div>
+                  <h2 className="text-2xl">Galerie Photo & Vidéo</h2>
+                  <p className="text-sm text-church-muted">Importez des lots de photos ou des dossiers complets en un clic.</p>
                 </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => setEditingDept(editingDept?.id === dept.id ? null : dept)}
-                    className="px-3 py-1.5 rounded-lg border border-[#2854A6]/30 text-[#2854A6] bg-blue-50/50 hover:bg-blue-100/50 text-xs font-semibold flex items-center gap-1"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    <span>{editingDept?.id === dept.id ? 'Fermer' : 'Modifier'}</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      const updated = {
-                        ...dept,
-                        isNameConfirmed: !dept.isNameConfirmed
-                      };
-                      onUpdateDepartment(updated);
-                      showNotification(`Statut de « ${dept.name} » mis à jour.`);
-                    }}
-                    className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-white text-slate-700 text-xs font-semibold"
-                  >
-                    {dept.isNameConfirmed ? 'Marquer à valider' : 'Valider dénomination'}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {editingDept && (
-            <div className="p-5 bg-[#F4F6F9] rounded-2xl border-2 border-[#2854A6]/40 space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                <h4 className="font-heading font-bold text-sm text-[#173567]">
-                  Modifier la structure : {editingDept.name} ({editingDept.code})
-                </h4>
-                <button
-                  onClick={() => setEditingDept(null)}
-                  className="text-xs text-slate-500 hover:text-slate-800"
-                >
-                  ✕ Fermer
+                <button onClick={() => openAlbumForm()} className="btn-primary">
+                  <Plus className="h-4 w-4" /> Nouvel album
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nom officiel</label>
-                  <input
-                    type="text"
-                    value={editingDept.name}
-                    onChange={(e) => setEditingDept({ ...editingDept, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
+              {albums.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-church-line p-8 text-center text-sm text-church-muted">
+                  Aucun album dans la galerie pour le moment.
                 </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Responsable désigné</label>
-                  <input
-                    type="text"
-                    value={editingDept.leader}
-                    onChange={(e) => setEditingDept({ ...editingDept, leader: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Rôle ou titre du leader</label>
-                  <input
-                    type="text"
-                    value={editingDept.leaderRole}
-                    onChange={(e) => setEditingDept({ ...editingDept, leaderRole: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Créneau de rencontre</label>
-                  <input
-                    type="text"
-                    value={editingDept.meetingSchedule}
-                    onChange={(e) => setEditingDept({ ...editingDept, meetingSchedule: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setEditingDept(null)}
-                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-white"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onUpdateDepartment(editingDept);
-                    setEditingDept(null);
-                    showNotification(`Modifications enregistrées pour « ${editingDept.name} ».`);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-[#2854A6] text-white text-xs font-semibold hover:bg-[#1f4489]"
-                >
-                  Enregistrer les modifications
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 10. SUBPAGE: MODÉRATION DES COMMENTAIRES (Auto-publiés avec contrôle Garder / Retirer) */}
-      {activeSubPage === 'commentaires' && (() => {
-        // Collect real comments from all published entities
-        const allCommentsList: Array<{
-          id: string;
-          targetId: string;
-          targetType: 'culte' | 'evenement' | 'actualite';
-          targetTitle: string;
-          author: string;
-          text: string;
-          date: string;
-          status: 'auto-publie' | 'approuve';
-          isReported?: boolean;
-        }> = [
-          ...cultes.flatMap((c) =>
-            (c.comments || []).map((comm) => ({
-              id: comm.id,
-              targetId: c.id,
-              targetType: 'culte' as const,
-              targetTitle: c.title,
-              author: comm.authorName,
-              text: comm.text,
-              date: comm.date,
-              status: comm.status || 'auto-publie',
-              isReported: comm.reported
-            }))
-          ),
-          ...events.flatMap((e) =>
-            (e.comments || []).map((comm) => ({
-              id: comm.id,
-              targetId: e.id,
-              targetType: 'evenement' as const,
-              targetTitle: e.title,
-              author: comm.authorName,
-              text: comm.text,
-              date: comm.date,
-              status: comm.status || 'auto-publie',
-              isReported: comm.reported
-            }))
-          ),
-          ...news.flatMap((n) =>
-            (n.comments || []).map((comm) => ({
-              id: comm.id,
-              targetId: n.id,
-              targetType: 'actualite' as const,
-              targetTitle: n.title,
-              author: comm.authorName,
-              text: comm.text,
-              date: comm.date,
-              status: comm.status || 'auto-publie',
-              isReported: comm.reported
-            }))
-          )
-        ];
-
-        return (
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-7 shadow-xs space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
-              <div>
-                <h3 className="font-heading font-bold text-base text-[#173567]">
-                  Contrôle & Modération des Commentaires
-                </h3>
-                <p className="text-xs text-[#343B46]/70 mt-0.5">
-                  Les commentaires déposés par les fidèles sur les cultes, événements et actualités sont publiés automatiquement. Vous avez le plein pouvoir de les <strong>Garder</strong> (valider définitivement) ou de les <strong>Retirer</strong> du site.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-1 rounded-full bg-blue-50 text-[#2854A6] text-xs font-bold border border-blue-200/60">
-                  {allCommentsList.length} commentaire{allCommentsList.length > 1 ? 's' : ''} au total
-                </span>
-              </div>
-            </div>
-
-            {allCommentsList.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 space-y-2">
-                <MessageCircle className="w-8 h-8 text-slate-300 mx-auto" />
-                <p className="text-sm font-semibold text-slate-600">Aucun commentaire pour le moment</p>
-                <p className="text-xs text-slate-400">
-                  Dès qu’un visiteur laisse un commentaire sur un culte, un événement ou un communiqué, il apparaîtra ici avec options de maintien ou de retrait.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3.5">
-                {allCommentsList.map((item) => (
-                  <div
-                    key={`${item.targetType}-${item.id}`}
-                    className="p-4 rounded-xl border text-xs space-y-2.5 transition-all bg-white border-slate-200 hover:border-slate-300 shadow-xs"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            item.targetType === 'culte'
-                              ? 'bg-blue-100 text-[#173567]'
-                              : item.targetType === 'evenement'
-                              ? 'bg-amber-100 text-amber-900'
-                              : 'bg-emerald-100 text-emerald-900'
-                          }`}
-                        >
-                          {item.targetType === 'culte'
-                            ? 'Culte'
-                            : item.targetType === 'evenement'
-                            ? 'Événement'
-                            : 'Actualité'}
-                        </span>
-
-                        <span className="font-bold text-[#173567] text-[13px]">{item.author}</span>
-                        <span className="text-slate-400">sur</span>
-                        <span className="font-semibold text-slate-800 italic">« {item.targetTitle} »</span>
-                      </div>
-
-                      <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>{item.date}</span>
-                        {item.status === 'approuve' ? (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold text-[10px] border border-emerald-200">
-                            ✓ Conservé
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold text-[10px] border border-blue-200">
-                            Auto-publié
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded-lg bg-[#F4F6F9] text-slate-700 text-xs leading-relaxed border border-slate-200/60 font-sans">
-                      {item.text}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onKeepComment?.(item.id, item.targetType, item.targetId);
-                          showNotification(`Commentaire de ${item.author} conservé et validé.`);
-                        }}
-                        className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1.5 transition-colors shadow-xs"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Garder le commentaire</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onRemoveComment?.(item.id, item.targetType, item.targetId);
-                          showNotification(`Commentaire de ${item.author} retiré du site.`);
-                        }}
-                        className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs flex items-center gap-1.5 transition-colors shadow-xs"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Retirer du site</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* 11. SUBPAGE: MÉDIAS & MODIFICATION COMPLÈTE DES IMAGES DU SITE ET DE LA PAGE HÉROS */}
-      {activeSubPage === 'medias' && (
-        <div className="space-y-6">
-          {/* Header */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-7 shadow-xs">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="font-heading font-bold text-lg text-[#173567] flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-amber-500" />
-                  <span>Gestion des Médias, Visuels & Textes de la Page Héros</span>
-                </h3>
-                <p className="text-xs text-[#343B46]/70 mt-1 leading-relaxed">
-                  Modifiez directement toutes les photos et affiches du site, ainsi que les textes d'introduction affichés sur la page d'accueil. Importez vos photos depuis votre téléphone ou ordinateur pour les appliquer immédiatement.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 1: Textes de la Page Héros */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-7 shadow-xs space-y-5">
-            <div className="pb-3 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h4 className="font-heading font-bold text-base text-[#173567]">
-                  1. Modifier l'écrit qui se trouve sur la page Héros
-                </h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Personnalisez les titres, badges officiels et messages d'accueil de la première section du site.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdateHeroContent(heroForm);
-                  showNotification('Les textes de la page Héros ont été enregistrés et mis à jour sur l’accueil !');
-                }}
-                className="px-4 py-2 rounded-xl bg-[#2854A6] hover:bg-[#1f4489] text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Enregistrer les textes</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Dénomination nationale (Badge supérieur)
-                </label>
-                <input
-                  type="text"
-                  value={heroForm.nationalBadge}
-                  onChange={(e) => setHeroForm({ ...heroForm, nationalBadge: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#2854A6]/20 bg-white"
-                  placeholder="Église Évangélique des Assemblées de Dieu de Côte d'Ivoire"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Paroisse locale officielle (Badge géographique)
-                </label>
-                <input
-                  type="text"
-                  value={heroForm.locationBadge}
-                  onChange={(e) => setHeroForm({ ...heroForm, locationBadge: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#2854A6]/20 bg-white"
-                  placeholder="Anyama, Ran-Extension Résidentiel"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Grand Titre de la page d'accueil (Héros)
-                </label>
-                <input
-                  type="text"
-                  value={heroForm.mainTitle}
-                  onChange={(e) => setHeroForm({ ...heroForm, mainTitle: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#2854A6]/20 bg-white font-medium"
-                  placeholder="Bienvenue à la Maison de Prière & d'Adoration"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Message d'accueil & verset biblique
-                </label>
-                <textarea
-                  rows={3}
-                  value={heroForm.welcomeMessage}
-                  onChange={(e) => setHeroForm({ ...heroForm, welcomeMessage: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#2854A6]/20 bg-white leading-relaxed"
-                  placeholder="Une communauté vivante unie par la foi, la prière et la fraternité..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Texte du 1er bouton d'action
-                </label>
-                <input
-                  type="text"
-                  value={heroForm.actionButtonCulte}
-                  onChange={(e) => setHeroForm({ ...heroForm, actionButtonCulte: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Texte du 2e bouton d'action
-                </label>
-                <input
-                  type="text"
-                  value={heroForm.actionButtonEvents}
-                  onChange={(e) => setHeroForm({ ...heroForm, actionButtonEvents: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
-                />
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdateHeroContent(heroForm);
-                  showNotification('Les textes de la page Héros ont été enregistrés avec succès !');
-                }}
-                className="px-5 py-2.5 rounded-xl bg-[#2854A6] hover:bg-[#1f4489] text-white text-xs font-bold flex items-center gap-2 shadow-xs transition-colors"
-              >
-                <Check className="w-4 h-4 text-emerald-300" />
-                <span>Enregistrer les textes de la page Héros</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Section 2: Modification de toutes les images du site */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-7 shadow-xs space-y-6">
-            <div className="pb-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h4 className="font-heading font-bold text-base text-[#173567]">
-                  2. Modifier toutes les images du site
-                </h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Remplacer les visuels clés du temple (bannière principale, chaire pastorale, chorale, jeunesse) par vos propres photos officielles.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdateSiteImages(imagesForm);
-                  showNotification('Toutes les images du site ont été enregistrées et appliquées !');
-                }}
-                className="px-4 py-2 rounded-xl bg-[#173567] hover:bg-[#0f2244] text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
-              >
-                <Check className="w-3.5 h-3.5 text-emerald-300" />
-                <span>Appliquer toutes les images</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Image 1: Bannière Héros */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-heading font-bold text-xs text-[#173567]">
-                    Bannière Principale de la Page d'Accueil (Héros)
-                  </span>
-                  <span className="text-[10px] font-semibold text-slate-400">16:9 / Plein écran</span>
-                </div>
-
-                <div className="relative aspect-video rounded-lg overflow-hidden border border-slate-200 bg-slate-200">
-                  <img
-                    src={imagesForm.heroImage}
-                    alt="Aperçu bannière héros"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="w-full py-2 px-3 rounded-lg bg-[#2854A6] hover:bg-[#1f4489] text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-xs">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Importer depuis mon appareil (Galerie / Fichiers)</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) =>
-                        handleImageFileUpload(e, (b64) =>
-                          setImagesForm((prev) => ({ ...prev, heroImage: b64 }))
-                        )
-                      }
-                      className="hidden"
-                    />
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={imagesForm.heroImage}
-                      onChange={(e) =>
-                        setImagesForm((prev) => ({ ...prev, heroImage: e.target.value }))
-                      }
-                      placeholder="Ou coller une URL d'image directe..."
-                      className="flex-1 px-2.5 py-1.5 text-[11px] border border-slate-300 rounded-lg bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setImagesForm((prev) => ({ ...prev, heroImage: HERO_IMAGE }))}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 text-[11px] font-medium whitespace-nowrap"
-                    >
-                      Défaut
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Image 2: Prédicateur / Chaire Pastorale */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-heading font-bold text-xs text-[#173567]">
-                    Photo Prédicateur & Chaire Pastorale
-                  </span>
-                  <span className="text-[10px] font-semibold text-slate-400">16:9 / Portrait</span>
-                </div>
-
-                <div className="relative aspect-video rounded-lg overflow-hidden border border-slate-200 bg-slate-200">
-                  <img
-                    src={imagesForm.pastorImage}
-                    alt="Aperçu prédicateur"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="w-full py-2 px-3 rounded-lg bg-[#2854A6] hover:bg-[#1f4489] text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-xs">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Importer depuis mon appareil</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) =>
-                        handleImageFileUpload(e, (b64) =>
-                          setImagesForm((prev) => ({ ...prev, pastorImage: b64 }))
-                        )
-                      }
-                      className="hidden"
-                    />
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={imagesForm.pastorImage}
-                      onChange={(e) =>
-                        setImagesForm((prev) => ({ ...prev, pastorImage: e.target.value }))
-                      }
-                      placeholder="Ou coller une URL d'image..."
-                      className="flex-1 px-2.5 py-1.5 text-[11px] border border-slate-300 rounded-lg bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setImagesForm((prev) => ({ ...prev, pastorImage: PASTOR_IMAGE }))}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 text-[11px] font-medium whitespace-nowrap"
-                    >
-                      Défaut
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Image 3: Chorale & Louange */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-heading font-bold text-xs text-[#173567]">
-                    Photo de la Chorale & Ministère de Louange
-                  </span>
-                  <span className="text-[10px] font-semibold text-slate-400">16:9 / Groupe</span>
-                </div>
-
-                <div className="relative aspect-video rounded-lg overflow-hidden border border-slate-200 bg-slate-200">
-                  <img
-                    src={imagesForm.choirImage}
-                    alt="Aperçu chorale"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="w-full py-2 px-3 rounded-lg bg-[#2854A6] hover:bg-[#1f4489] text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-xs">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Importer depuis mon appareil</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) =>
-                        handleImageFileUpload(e, (b64) =>
-                          setImagesForm((prev) => ({ ...prev, choirImage: b64 }))
-                        )
-                      }
-                      className="hidden"
-                    />
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={imagesForm.choirImage}
-                      onChange={(e) =>
-                        setImagesForm((prev) => ({ ...prev, choirImage: e.target.value }))
-                      }
-                      placeholder="Ou coller une URL d'image..."
-                      className="flex-1 px-2.5 py-1.5 text-[11px] border border-slate-300 rounded-lg bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setImagesForm((prev) => ({ ...prev, choirImage: HERO_IMAGE }))}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 text-[11px] font-medium whitespace-nowrap"
-                    >
-                      Défaut
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Image 4: Jeunesse & Avenir */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-heading font-bold text-xs text-[#173567]">
-                    Photo de la Jeunesse (JAD) & Rassemblements
-                  </span>
-                  <span className="text-[10px] font-semibold text-slate-400">16:9 / Dynamique</span>
-                </div>
-
-                <div className="relative aspect-video rounded-lg overflow-hidden border border-slate-200 bg-slate-200">
-                  <img
-                    src={imagesForm.youthImage}
-                    alt="Aperçu jeunesse"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="w-full py-2 px-3 rounded-lg bg-[#2854A6] hover:bg-[#1f4489] text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-xs">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Importer depuis mon appareil</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) =>
-                        handleImageFileUpload(e, (b64) =>
-                          setImagesForm((prev) => ({ ...prev, youthImage: b64 }))
-                        )
-                      }
-                      className="hidden"
-                    />
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={imagesForm.youthImage}
-                      onChange={(e) =>
-                        setImagesForm((prev) => ({ ...prev, youthImage: e.target.value }))
-                      }
-                      placeholder="Ou coller une URL d'image..."
-                      className="flex-1 px-2.5 py-1.5 text-[11px] border border-slate-300 rounded-lg bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setImagesForm((prev) => ({ ...prev, youthImage: HERO_IMAGE }))}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 text-[11px] font-medium whitespace-nowrap"
-                    >
-                      Défaut
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <span className="text-xs text-slate-500">
-                Toutes les modifications sont enregistrées instantanément et visibles sur l'ensemble du site public.
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdateSiteImages(imagesForm);
-                  showNotification('Toutes les images du site ont été enregistrées avec succès !');
-                }}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-[#173567] hover:bg-[#0f2244] text-white text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-colors"
-              >
-                <Check className="w-4 h-4 text-emerald-300" />
-                <span>Enregistrer & Appliquer les images du site</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Section 3: Rappel Logo Officiel Navbar */}
-          <div className="p-5 rounded-2xl bg-[#F4F6F9] border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-xl bg-white border border-slate-200 p-1.5 flex items-center justify-center shrink-0">
-                <ChurchLogo logoUrl={officialLogoUrl} size="md" />
-              </div>
-              <div>
-                <h5 className="font-heading font-bold text-xs text-[#173567]">
-                  Logo officiel de l'église (Navbar & En-tête)
-                </h5>
-                <p className="text-[11px] text-[#343B46]/70 mt-0.5">
-                  {officialLogoUrl ? 'Logo personnalisé actuellement en place.' : 'Emblème vectoriel par défaut.'} Vous pouvez importer un nouveau fichier logo à tout moment.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onNavigateSubPage('parametres')}
-              className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[#173567] text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs shrink-0"
-            >
-              <Settings className="w-3.5 h-3.5 text-[#2854A6]" />
-              <span>Gérer le logo dans les Paramètres</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 11. SUBPAGE: PARAMÈTRES & IMPORT DU LOGO OFFICIEL */}
-      {activeSubPage === 'parametres' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-7 space-y-6">
-          <div className="pb-3 border-b border-slate-100">
-            <h3 className="font-heading font-bold text-base text-[#173567]">
-              Paramètres du Site & Import du Logo Officiel
-            </h3>
-            <p className="text-xs text-[#343B46]/70">
-              Importez le fichier original du logo officiel de l’Église Évangélique des Assemblées de Dieu de Côte d'Ivoire (EEADCI) pour l'appliquer immédiatement sur l'ensemble du site.
-            </p>
-          </div>
-
-          {/* Section Logo Officiel */}
-          <div className="p-5 rounded-2xl bg-[#F4F6F9] border-l-4 border-[#2854A6] space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="font-heading font-bold text-sm text-[#173567]">
-                  Logo Officiel de l’Église (EEADCI)
-                </h4>
-                <p className="text-xs text-[#343B46] mt-0.5">
-                  Importez le visuel officiel directement depuis la galerie ou les fichiers de votre smartphone ou ordinateur.
-                </p>
-              </div>
-
-              {officialLogoUrl ? (
-                <span className="px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                  Logo Officiel Actif
-                </span>
               ) : (
-                <span className="px-2.5 py-1 rounded bg-blue-100 text-[#173567] text-[10px] font-bold">
-                  Emblème Vectoriel Actif
-                </span>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {albums.map((alb) => (
+                    <div key={alb.id} className="surface overflow-hidden">
+                      <img
+                        src={sanitizeUrl(alb.coverImage) || HERO_IMAGE}
+                        alt={alb.title}
+                        className="aspect-[4/3] w-full object-cover bg-church-navy"
+                      />
+                      <div className="p-4 space-y-2">
+                        <div className="text-xs font-semibold text-church-blue">
+                          {alb.category} · {alb.mediaCount || alb.items.length} média(s) · {alb.viewsCount || 0} vue(s)
+                        </div>
+                        <h3 className="font-serif text-lg text-church-navy">{alb.title}</h3>
+                        <div className="flex items-center gap-2 pt-2">
+                          <button onClick={() => openAlbumForm(alb)} className="btn-secondary min-h-[36px] flex-1 text-xs">
+                            <Pencil className="h-3.5 w-3.5" /> Modifier
+                          </button>
+                          {confirmDeleteKey === `alb:${alb.id}` ? (
+                            <button
+                              onClick={async () => {
+                                const res = await api.deleteAlbum(alb.id);
+                                onSyncPublicState({ albums: res.albums });
+                                setConfirmDeleteKey(null);
+                                notify('Album supprimé.');
+                              }}
+                              className="btn-primary min-h-[36px] bg-red-600 hover:bg-red-700 px-3 text-xs"
+                            >
+                              OK
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDeleteKey(`alb:${alb.id}`)}
+                              className="btn-secondary min-h-[36px] px-3 text-xs text-red-700"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
+          )}
 
-            {/* Current / Preview Logo Box */}
-            <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-white rounded-xl border border-slate-200">
-              <div className="w-24 h-24 rounded-2xl border border-slate-200 flex items-center justify-center p-2 bg-[#F4F6F9] overflow-hidden shrink-0">
-                <ChurchLogo logoUrl={logoPreview} size="xl" />
+          {/* ==================== CREER / MODIFIER ALBUM ==================== */}
+          {activeSubPage === 'galerie-creer' && editingAlbum && (
+            <form onSubmit={handleSaveAlbum} className="surface p-5 sm:p-7 space-y-5">
+              <div className="flex items-center justify-between border-b border-church-line pb-4">
+                <h2 className="text-2xl">{albums.some((a) => a.id === editingAlbum.id) ? 'Modifier l’album' : 'Créer un album galerie'}</h2>
+                <button type="button" onClick={() => onNavigateSubPage('galerie')} className="btn-ghost text-sm">
+                  Annuler
+                </button>
               </div>
 
-              <div className="space-y-2 flex-1 text-center sm:text-left">
-                <span className="text-xs font-semibold text-[#173567] block">
-                  {logoPreview
-                    ? officialLogoUrl === logoPreview
-                      ? 'Logo officiel de l’église actuellement déployé sur tout le site'
-                      : 'Nouveau fichier sélectionné — Prêt à être déployé'
-                    : 'Emblème vectoriel officiel par défaut (aucune photo importée)'}
-                </span>
-                <p className="text-[11px] text-[#343B46]/80 leading-relaxed">
-                  Formats recommandés : PNG transparent haute résolution, JPEG ou SVG. Une fois enregistré, il s'affiche dans l'en-tête, le pied de page, les partages et l'espace administratif.
-                </p>
-
-                <div className="flex flex-wrap items-center gap-2 pt-1 justify-center sm:justify-start">
-                  <label className="px-3.5 py-2 rounded-xl bg-[#2854A6] hover:bg-[#1f4489] text-white text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 shadow-xs">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Importer le logo depuis mon appareil</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleLogoFileChange}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {logoPreview && logoPreview !== officialLogoUrl && (
-                    <button
-                      onClick={handleSaveOfficialLogo}
-                      className="px-4 py-2 rounded-xl bg-[#173567] hover:bg-[#0f2244] text-white text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
-                    >
-                      <Check className="w-3.5 h-3.5 text-emerald-300" />
-                      <span>Appliquer à tout le site</span>
-                    </button>
-                  )}
-
-                  {officialLogoUrl && (
-                    <button
-                      onClick={handleResetToProvisionalLogo}
-                      className="px-3 py-2 rounded-xl border border-slate-200 text-[#343B46] hover:bg-slate-50 text-xs font-medium transition-colors"
-                    >
-                      Rétablir l'emblème par défaut
-                    </button>
-                  )}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Titre de l’album *</label>
+                  <input
+                    required
+                    value={editingAlbum.title}
+                    onChange={(e) => setEditingAlbum({ ...editingAlbum, title: e.target.value })}
+                    className="field"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Catégorie</label>
+                  <select
+                    value={editingAlbum.category}
+                    onChange={(e) => setEditingAlbum({ ...editingAlbum, category: e.target.value as AlbumItem['category'] })}
+                    className="field"
+                  >
+                    <option value="Cultes">Cultes</option>
+                    <option value="Événements">Événements</option>
+                    <option value="Jeunesse">Jeunesse</option>
+                    <option value="Chorale & Louange">Chorale & Louange</option>
+                    <option value="Femmes MIFA">Femmes MIFA</option>
+                    <option value="Départements">Départements</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Date</label>
+                  <input
+                    type="date"
+                    value={editingAlbum.date}
+                    onChange={(e) => setEditingAlbum({ ...editingAlbum, date: e.target.value })}
+                    className="field"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-church-navy">Description courte</label>
+                  <textarea
+                    rows={2}
+                    value={editingAlbum.description}
+                    onChange={(e) => setEditingAlbum({ ...editingAlbum, description: e.target.value })}
+                    className="field py-2 min-h-[70px]"
+                  />
                 </div>
               </div>
-            </div>
-          </div>
 
-          {/* Section Équipe Com */}
-          <div className="space-y-3 pt-2">
-            <h4 className="font-heading font-bold text-sm text-church-navy">
-              Comptes de l'Équipe de Communication (Paroisse d’Anyama)
-            </h4>
-            <div className="space-y-2">
-              {[
-                { name: 'Diacre Jean-Paul Yao', email: 'jp.yao@ad-anyama.ci', role: 'Coordination Com & Médias' },
-                { name: 'Sœur Grâce Koné', email: 'g.kone@ad-anyama.ci', role: 'Rédactrice Prédications' },
-                { name: 'Frère Stéphane Koffi', email: 's.koffi@ad-anyama.ci', role: 'Photographie & Vidéo' }
-              ].map((m, i) => (
-                <div key={i} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50 text-xs">
-                  <div>
-                    <span className="font-bold text-church-navy block">{m.name}</span>
-                    <span className="text-slate-500">{m.email} · {m.role}</span>
+              <div className="rounded-2xl border border-church-line p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-lg">Importer des lots de photos ou depuis Google Drive</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowAlbumDrivePicker((v) => !v)}
+                    className="btn-secondary min-h-[38px] text-xs"
+                  >
+                    <HardDrive className="h-3.5 w-3.5 text-church-blue" />
+                    {showAlbumDrivePicker ? 'Masquer Google Drive' : 'Parcourir Google Drive'}
+                  </button>
+                </div>
+
+                {showAlbumDrivePicker && (
+                  <GoogleDriveBrowser
+                    compact
+                    allowDocuments={false}
+                    linkedAccounts={driveAccounts}
+                    linkedFolders={driveFolders}
+                    targetAlbumId={albums.some((a) => a.id === editingAlbum.id) ? editingAlbum.id : undefined}
+                    defaultCategory={editingAlbum.category}
+                    onSyncDriveState={(patch) => {
+                      onSyncDriveState(patch);
+                      if (patch.albums) onSyncPublicState({ albums: patch.albums });
+                    }}
+                    onImportedToForm={(items) => {
+                      setEditingAlbum((prev) => {
+                        if (!prev) return prev;
+                        const nextItems = [...prev.items, ...items];
+                        const hasPhoto = nextItems.some((it) => it.type === 'photo');
+                        const hasNonPhoto = nextItems.some((it) => it.type !== 'photo');
+                        const nextType: AlbumItem['type'] =
+                          hasPhoto && hasNonPhoto ? 'mixte' : !hasPhoto && nextItems.some((it) => it.type === 'video') ? 'video' : 'photo';
+                        return {
+                          ...prev,
+                          type: nextType,
+                          items: nextItems,
+                          coverImage: prev.coverImage || nextItems.find((it) => it.type === 'photo')?.url || nextItems[0]?.url || '',
+                          mediaCount: nextItems.length
+                        };
+                      });
+                    }}
+                    onNotify={notify}
+                  />
+                )}
+
+                <MediaBatchUploader
+                  mode="photos"
+                  helperText="Sélectionnez plusieurs photos d'un coup, glissez-déposez ou importez un dossier complet depuis votre appareil."
+                  onUploadedFiles={(res) => {
+                    const added: MediaItem[] = res.map((r, i) => ({
+                      id: `media-${Date.now()}-${i}`,
+                      type: 'photo',
+                      url: r.url,
+                      caption: r.name
+                    }));
+                    setEditingAlbum((prev) => {
+                      if (!prev) return prev;
+                      const nextItems = [...prev.items, ...added];
+                      return {
+                        ...prev,
+                        items: nextItems,
+                        coverImage: prev.coverImage || nextItems[0]?.url || '',
+                        mediaCount: nextItems.length
+                      };
+                    });
+                  }}
+                />
+
+                {/* Ajouter aussi une vidéo */}
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-church-line">
+                  <input
+                    value={videoItemUrl}
+                    onChange={(e) => setVideoItemUrl(e.target.value)}
+                    placeholder="Lien vidéo YouTube ou MP4 à ajouter à l'album"
+                    className="field flex-1 text-sm min-w-[220px]"
+                  />
+                  <input
+                    value={videoItemCaption}
+                    onChange={(e) => setVideoItemCaption(e.target.value)}
+                    placeholder="Légende vidéo"
+                    className="field w-48 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!videoItemUrl.trim()) return;
+                      const newVid: MediaItem = {
+                        id: `vid-${Date.now()}`,
+                        type: 'video',
+                        url: toSafeYoutubeEmbed(videoItemUrl.trim()),
+                        caption: videoItemCaption.trim() || 'Vidéo'
+                      };
+                      setEditingAlbum({
+                        ...editingAlbum,
+                        type: editingAlbum.items.some((i) => i.type === 'photo') ? 'mixte' : 'video',
+                        items: [...editingAlbum.items, newVid],
+                        mediaCount: editingAlbum.items.length + 1
+                      });
+                      setVideoItemUrl('');
+                      setVideoItemCaption('');
+                    }}
+                    className="btn-secondary text-xs"
+                  >
+                    + Ajouter vidéo
+                  </button>
+                </div>
+
+                {editingAlbum.items.length > 0 && (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {editingAlbum.items.map((item, idx) => (
+                      <div key={item.id} className="rounded-xl border border-church-line p-2 space-y-1.5">
+                        {item.type === 'photo' ? (
+                          <img src={sanitizeUrl(item.url)} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+                        ) : (
+                          <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 rounded-lg bg-church-navy text-xs text-white">
+                            {item.type === 'audio' ? <Headphones className="h-5 w-5" /> : <Film className="h-5 w-5" />}
+                            <span>{item.type === 'audio' ? 'Audio' : 'Vidéo'}</span>
+                          </div>
+                        )}
+                        <input
+                          value={item.caption || ''}
+                          onChange={(e) =>
+                            setEditingAlbum({
+                              ...editingAlbum,
+                              items: editingAlbum.items.map((it, i) => (i === idx ? { ...it, caption: e.target.value } : it))
+                            })
+                          }
+                          placeholder="Légende..."
+                          className="w-full rounded-lg border border-church-line px-2 py-1 text-xs"
+                        />
+                        <div className="flex items-center justify-between text-[11px]">
+                          {item.type === 'photo' ? (
+                            <button
+                              type="button"
+                              onClick={() => setEditingAlbum({ ...editingAlbum, coverImage: item.url })}
+                              className={`font-semibold ${
+                                editingAlbum.coverImage === item.url ? 'text-emerald-700' : 'text-church-blue hover:underline'
+                              }`}
+                            >
+                              {editingAlbum.coverImage === item.url ? 'Couverture ✓' : 'Couverture'}
+                            </button>
+                          ) : (
+                            <span className="text-church-muted">{item.type === 'audio' ? 'Audio' : 'Vidéo'}</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = editingAlbum.items.filter((_, i) => i !== idx);
+                              setEditingAlbum({
+                                ...editingAlbum,
+                                items: next,
+                                mediaCount: next.length
+                              });
+                            }}
+                            className="text-red-700 hover:underline"
+                          >
+                            Retirer
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-semibold">
-                    Actif
-                  </span>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => onNavigateSubPage('galerie')} className="btn-secondary">
+                  Annuler
+                </button>
+                <button type="submit" disabled={saving} className="btn-primary">
+                  {saving ? 'Enregistrement...' : 'Enregistrer l’album'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ==================== GOOGLE DRIVE MULTI-COMPTES (ADMIN) ==================== */}
+          {activeSubPage === 'drive' && (
+            <GoogleDriveBrowser
+              linkedAccounts={driveAccounts}
+              linkedFolders={driveFolders}
+              onSyncDriveState={(patch) => {
+                onSyncDriveState(patch);
+                if (patch.albums) onSyncPublicState({ albums: patch.albums });
+              }}
+              onNotify={notify}
+            />
+          )}
+
+          {/* ==================== DÉPARTEMENTS ==================== */}
+          {activeSubPage === 'departements' && (
+            <div className="space-y-6">
+              {editingDept ? (
+                <form onSubmit={handleSaveDepartment} className="surface p-5 sm:p-7 space-y-5">
+                  <div className="flex items-center justify-between border-b border-church-line pb-4">
+                    <h2 className="text-2xl">
+                      {departments.some((d) => d.id === editingDept.id) ? `Modifier : ${editingDept.name}` : 'Nouveau département'}
+                    </h2>
+                    <button type="button" onClick={() => setEditingDept(null)} className="btn-ghost text-sm">
+                      Annuler
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Nom du département *</label>
+                      <input
+                        required
+                        value={editingDept.name}
+                        onChange={(e) => setEditingDept({ ...editingDept, name: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Sigle / Code</label>
+                      <input
+                        value={editingDept.code}
+                        onChange={(e) => setEditingDept({ ...editingDept, code: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Devise / Slogan (optionnel)</label>
+                      <input
+                        value={editingDept.tagline}
+                        onChange={(e) => setEditingDept({ ...editingDept, tagline: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Description</label>
+                      <textarea
+                        rows={3}
+                        value={editingDept.description}
+                        onChange={(e) => setEditingDept({ ...editingDept, description: e.target.value })}
+                        className="field py-2.5 min-h-[84px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Responsable</label>
+                      <input
+                        value={editingDept.leader}
+                        onChange={(e) => setEditingDept({ ...editingDept, leader: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Fonction du responsable</label>
+                      <input
+                        value={editingDept.leaderRole}
+                        onChange={(e) => setEditingDept({ ...editingDept, leaderRole: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Jour & Horaire des réunions</label>
+                      <input
+                        value={editingDept.meetingSchedule}
+                        onChange={(e) => setEditingDept({ ...editingDept, meetingSchedule: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Lieu de rencontre</label>
+                      <input
+                        value={editingDept.meetingLocation}
+                        onChange={(e) => setEditingDept({ ...editingDept, meetingLocation: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-church-navy">Téléphone</label>
+                      <input
+                        value={editingDept.contactPhone || ''}
+                        onChange={(e) => setEditingDept({ ...editingDept, contactPhone: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-church-navy">E-mail</label>
+                      <input
+                        value={editingDept.contactEmail || ''}
+                        onChange={(e) => setEditingDept({ ...editingDept, contactEmail: e.target.value })}
+                        className="field"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Activités principales (une par ligne)</label>
+                    <textarea
+                      rows={3}
+                      value={deptActivitiesText}
+                      onChange={(e) => setDeptActivitiesText(e.target.value)}
+                      className="field py-2.5 min-h-[84px]"
+                    />
+                  </div>
+
+                  <div className="rounded-2xl border border-church-line p-4 space-y-4">
+                    <h3 className="text-lg">Logo officiel, image de couverture, galerie photos & documents</h3>
+                    <div className="space-y-2 rounded-xl border border-church-line/80 bg-church-light/40 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-church-navy">Logo du département (optionnel)</span>
+                        {editingDept.logoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingDept({ ...editingDept, logoUrl: '' })}
+                            className="text-xs text-red-700 hover:underline"
+                          >
+                            Retirer le logo
+                          </button>
+                        )}
+                      </div>
+                      {editingDept.logoUrl && sanitizeUrl(editingDept.logoUrl) && (
+                        <img
+                          src={sanitizeUrl(editingDept.logoUrl)}
+                          alt={`Logo ${editingDept.name}`}
+                          className="h-16 w-16 rounded-xl border border-church-line bg-white object-contain p-1"
+                        />
+                      )}
+                      <MediaBatchUploader
+                        mode="single-image"
+                        label="Importer / remplacer le logo officiel"
+                        allowFolder={false}
+                        onUploadedFiles={(res) => {
+                          if (res[0]) setEditingDept((prev) => (prev ? { ...prev, logoUrl: res[0].url } : prev));
+                        }}
+                      />
+                    </div>
+                    <MediaBatchUploader
+                      mode="single-image"
+                      label="Photo de couverture du département"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setEditingDept((prev) => (prev ? { ...prev, coverImage: res[0].url } : prev));
+                      }}
+                    />
+                    <MediaBatchUploader
+                      mode="photos"
+                      label="Photos du département (lot ou dossier)"
+                      onUploadedFiles={(res) => {
+                        setEditingDept((prev) =>
+                          prev ? { ...prev, galleryImages: [...prev.galleryImages, ...res.map((r) => r.url)] } : prev
+                        );
+                      }}
+                    />
+                    <MediaBatchUploader
+                      mode="documents"
+                      label="Documents du département (PDF, Word...)"
+                      onUploadedFiles={() => {}}
+                      onUploadedDocuments={(docs) =>
+                        setEditingDept((prev) =>
+                          prev ? { ...prev, documents: [...(prev.documents || []), ...docs] } : prev
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-3">
+                    <button type="button" onClick={() => setEditingDept(null)} className="btn-secondary">
+                      Annuler
+                    </button>
+                    <button type="submit" disabled={saving} className="btn-primary">
+                      {saving ? 'Enregistrement...' : 'Enregistrer le département'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="surface p-5 sm:p-6 space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-2xl">Départements & Groupes</h2>
+                      <p className="text-sm text-church-muted">Ajoutez ou mettez à jour les responsables, horaires, photos et documents.</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingDept(emptyDepartmentForm());
+                        setDeptActivitiesText('');
+                      }}
+                      className="btn-primary"
+                    >
+                      <Plus className="h-4 w-4" /> Nouveau département
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-church-line">
+                    {departments.map((d) => (
+                      <div key={d.id} className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <span className="text-xs font-semibold text-church-blue">{d.code}</span>
+                          <h3 className="font-serif text-lg text-church-navy">{d.name}</h3>
+                          {d.leader && <p className="text-xs text-church-muted">Responsable : {d.leader}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button onClick={() => handleSelectDeptEdit(d)} className="btn-secondary min-h-[38px] px-3 text-xs">
+                            <Pencil className="h-3.5 w-3.5" /> Modifier
+                          </button>
+                          {confirmDeleteKey === `dept:${d.id}` ? (
+                            <button
+                              onClick={async () => {
+                                const res = await api.deleteDepartment(d.id);
+                                onSyncPublicState({ departments: res.departments });
+                                setConfirmDeleteKey(null);
+                                notify('Département supprimé.');
+                              }}
+                              className="btn-primary min-h-[38px] bg-red-600 hover:bg-red-700 px-3 text-xs"
+                            >
+                              Confirmer
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDeleteKey(`dept:${d.id}`)}
+                              className="btn-secondary min-h-[38px] px-3 text-xs text-red-700"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              )}
             </div>
-          </div>
-        </div>
-      )}
+          )}
+
+          {/* ==================== COMMENTAIRES ==================== */}
+          {activeSubPage === 'commentaires' && (
+            <div className="surface p-5 sm:p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl">Modération des commentaires</h2>
+                  <p className="text-sm text-church-muted">
+                    Les messages sont publiés automatiquement ; vous pouvez les approuver ou les retirer à tout moment.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'tous' as const, label: 'Tous' },
+                    { id: 'signales' as const, label: 'Signalés' },
+                    { id: 'auto-publie' as const, label: 'Auto-publiés' },
+                    { id: 'approuve' as const, label: 'Approuvés' }
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setCommentFilter(f.id)}
+                      className={commentFilter === f.id ? 'chip-active' : 'chip'}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {filteredComments.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-church-line p-8 text-center text-sm text-church-muted">
+                  Aucun commentaire dans cette vue.
+                </div>
+              ) : (
+                <div className="divide-y divide-church-line">
+                  {filteredComments.map((cm) => (
+                    <div key={cm.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-semibold text-church-navy">{cm.authorName}</span>
+                          <span className="text-church-muted">· {cm.date}</span>
+                          <span className="rounded-full bg-church-tint px-2 py-0.5 text-[11px] font-medium text-church-blue">
+                            {cm.targetTitle}
+                          </span>
+                          {cm.reported && (
+                            <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+                              Signalé
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-church-dark">{cm.text}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={async () => {
+                            const res = await api.keepComment(cm.targetType, cm.targetId, cm.id);
+                            onSyncPublicState({ cultes: res.cultes, events: res.events, news: res.news });
+                            notify('Commentaire approuvé.');
+                          }}
+                          className="btn-secondary min-h-[36px] px-3 text-xs"
+                        >
+                          <Check className="h-3.5 w-3.5 text-emerald-700" /> Garder
+                        </button>
+                        <button
+                          onClick={async () => {
+                            const res = await api.removeComment(cm.targetType, cm.targetId, cm.id);
+                            onSyncPublicState({ cultes: res.cultes, events: res.events, news: res.news });
+                            notify('Commentaire retiré.');
+                          }}
+                          className="btn-secondary min-h-[36px] px-3 text-xs text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Retirer
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ==================== MÉDIAS, LOGO, HERO & BANNIÈRE ==================== */}
+          {activeSubPage === 'medias' && (
+            <form onSubmit={handleSaveMediaAndHero} className="space-y-6">
+              <div className="surface p-5 sm:p-6 space-y-5">
+                <h2 className="text-2xl">Logo officiel de l’église</h2>
+                <div className="flex flex-wrap items-center gap-4">
+                  {logoDraft && (
+                    <img src={sanitizeUrl(logoDraft)} alt="Logo actuel" className="h-16 w-16 rounded-xl border border-church-line object-contain p-1" />
+                  )}
+                  {logoDraft && (
+                    <button type="button" onClick={() => setLogoDraft(null)} className="btn-secondary text-xs">
+                      Revenir à l’emblème EEADCI
+                    </button>
+                  )}
+                </div>
+                <MediaBatchUploader
+                  mode="single-image"
+                  label="Importer le logo officiel (PNG, SVG, JPG)"
+                  allowFolder={false}
+                  onUploadedFiles={(res) => {
+                    if (res[0]) setLogoDraft(res[0].url);
+                  }}
+                />
+              </div>
+
+              <div className="surface p-5 sm:p-6 space-y-4">
+                <h2 className="text-2xl">Textes de la page d’accueil (Hero)</h2>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Mention dénomination</label>
+                    <input
+                      value={heroDraft.nationalBadge}
+                      onChange={(e) => setHeroDraft({ ...heroDraft, nationalBadge: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Localisation</label>
+                    <input
+                      value={heroDraft.locationBadge}
+                      onChange={(e) => setHeroDraft({ ...heroDraft, locationBadge: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Grand titre d’accueil</label>
+                    <input
+                      value={heroDraft.mainTitle}
+                      onChange={(e) => setHeroDraft({ ...heroDraft, mainTitle: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Message de bienvenue</label>
+                    <textarea
+                      rows={3}
+                      value={heroDraft.welcomeMessage}
+                      onChange={(e) => setHeroDraft({ ...heroDraft, welcomeMessage: e.target.value })}
+                      className="field py-2.5 min-h-[84px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Bouton principal</label>
+                    <input
+                      value={heroDraft.actionButtonCulte}
+                      onChange={(e) => setHeroDraft({ ...heroDraft, actionButtonCulte: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Bouton secondaire</label>
+                    <input
+                      value={heroDraft.actionButtonEvents}
+                      onChange={(e) => setHeroDraft({ ...heroDraft, actionButtonEvents: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="surface p-5 sm:p-6 space-y-4">
+                <h2 className="text-2xl">Bannière d’annonce en haut de l’accueil</h2>
+                <label className="flex items-center gap-2.5 text-sm font-semibold text-church-navy cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bannerDraft.enabled}
+                    onChange={(e) => setBannerDraft({ ...bannerDraft, enabled: e.target.checked })}
+                    className="h-4 w-4 accent-church-blue"
+                  />
+                  Afficher une bannière d’annonce en haut du site
+                </label>
+                {bannerDraft.enabled && (
+                  <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
+                    <input
+                      value={bannerDraft.text}
+                      onChange={(e) => setBannerDraft({ ...bannerDraft, text: e.target.value })}
+                      placeholder="Ex. Grande semaine de prière du 12 au 18 mai à 18h30"
+                      className="field"
+                    />
+                    <select
+                      value={bannerDraft.linkPage || 'evenements'}
+                      onChange={(e) => setBannerDraft({ ...bannerDraft, linkPage: e.target.value as PageView })}
+                      className="field"
+                    >
+                      <option value="evenements">Lien vers Événements</option>
+                      <option value="cultes">Lien vers Cultes</option>
+                      <option value="actualites">Lien vers Actualités</option>
+                      <option value="departements">Lien vers Départements</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="surface p-5 sm:p-6 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-2xl">Images principales du site</h2>
+                  <button
+                    type="button"
+                    onClick={() => setImagesDraft(DEFAULT_SITE_IMAGES)}
+                    className="btn-ghost text-xs"
+                  >
+                    Réinitialiser les images par défaut
+                  </button>
+                </div>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  {(
+                    [
+                      { key: 'heroImage', label: 'Image de fond d’accueil' },
+                      { key: 'pastorImage', label: 'Image Prédication / Chaire' },
+                      { key: 'choirImage', label: 'Image Louange / Chorale' },
+                      { key: 'youthImage', label: 'Image Jeunesse' }
+                    ] as const
+                  ).map(({ key, label }) => (
+                    <div key={key} className="rounded-2xl border border-church-line p-4 space-y-3">
+                      <p className="text-sm font-semibold text-church-navy">{label}</p>
+                      <img
+                        src={sanitizeUrl(imagesDraft[key]) || DEFAULT_SITE_IMAGES[key]}
+                        alt={label}
+                        className="aspect-[16/9] w-full rounded-xl object-cover bg-church-navy"
+                      />
+                      <MediaBatchUploader
+                        mode="single-image"
+                        label="Remplacer l’image"
+                        allowFolder={false}
+                        onUploadedFiles={(res) => {
+                          if (res[0]) setImagesDraft((prev) => ({ ...prev, [key]: res[0].url }));
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button type="submit" disabled={saving} className="btn-primary">
+                  {saving ? 'Enregistrement...' : 'Enregistrer les textes et médias'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ==================== APPARENCE, SECTIONS & HORAIRES ==================== */}
+          {activeSubPage === 'parametres' && (
+            <form onSubmit={handleSaveSettings} className="space-y-6">
+              <div className="surface p-5 sm:p-6 space-y-5">
+                <h2 className="text-2xl">Apparence & Personnalisation du site</h2>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Couleur principale</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={settingsDraft.theme?.primaryColor || '#2854A6'}
+                        onChange={(e) =>
+                          setSettingsDraft({
+                            ...settingsDraft,
+                            theme: { ...settingsDraft.theme!, primaryColor: e.target.value }
+                          })
+                        }
+                        className="h-11 w-14 cursor-pointer rounded-xl border border-church-line"
+                      />
+                      <input
+                        value={settingsDraft.theme?.primaryColor || '#2854A6'}
+                        onChange={(e) =>
+                          setSettingsDraft({
+                            ...settingsDraft,
+                            theme: { ...settingsDraft.theme!, primaryColor: e.target.value }
+                          })
+                        }
+                        className="field text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Couleur titres & pied</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={settingsDraft.theme?.navyColor || '#173567'}
+                        onChange={(e) =>
+                          setSettingsDraft({
+                            ...settingsDraft,
+                            theme: { ...settingsDraft.theme!, navyColor: e.target.value }
+                          })
+                        }
+                        className="h-11 w-14 cursor-pointer rounded-xl border border-church-line"
+                      />
+                      <input
+                        value={settingsDraft.theme?.navyColor || '#173567'}
+                        onChange={(e) =>
+                          setSettingsDraft({
+                            ...settingsDraft,
+                            theme: { ...settingsDraft.theme!, navyColor: e.target.value }
+                          })
+                        }
+                        className="field text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Style des angles</label>
+                    <select
+                      value={settingsDraft.theme?.radiusStyle || 'doux'}
+                      onChange={(e) =>
+                        setSettingsDraft({
+                          ...settingsDraft,
+                          theme: {
+                            ...settingsDraft.theme!,
+                            radiusStyle: e.target.value as 'classique' | 'doux' | 'tres-doux'
+                          }
+                        })
+                      }
+                      className="field"
+                    >
+                      <option value="classique">Classique (légers)</option>
+                      <option value="doux">Doux (recommandé)</option>
+                      <option value="tres-doux">Très arrondis</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-church-line">
+                  <p className="mb-3 text-sm font-semibold text-church-navy">Sections visibles sur la page d’accueil</p>
+                  <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                    {(
+                      [
+                        { key: 'showQuickAccess', label: 'Cartes d’accès rapide' },
+                        { key: 'showLatestCulte', label: 'Dernière prédication' },
+                        { key: 'showSchedules', label: 'Horaires hebdomadaires' },
+                        { key: 'showEventsAndNews', label: 'Événements & Actualités' },
+                        { key: 'showGallery', label: 'En images (Galerie)' },
+                        { key: 'showDepartments', label: 'Départements & groupes' }
+                      ] as const
+                    ).map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 text-sm text-church-dark cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(settingsDraft.homeSections?.[key])}
+                          onChange={(e) =>
+                            setSettingsDraft({
+                              ...settingsDraft,
+                              homeSections: { ...settingsDraft.homeSections!, [key]: e.target.checked }
+                            })
+                          }
+                          className="h-4 w-4 accent-church-blue"
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="surface p-5 sm:p-6 space-y-4">
+                <h2 className="text-2xl">Coordonnées & rattachement de l’assemblée</h2>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Nom de l’assemblée (Annexe)</label>
+                    <input
+                      value={settingsDraft.parishName}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, parishName: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Statut d’annexe</label>
+                    <input
+                      value={settingsDraft.annexLabel || ''}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, annexLabel: e.target.value })}
+                      placeholder="Ex. Annexe de l’église d’Anyama Ran-Extension"
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Église mère de rattachement</label>
+                    <input
+                      value={settingsDraft.motherChurch || ''}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, motherChurch: e.target.value })}
+                      placeholder="Ex. Église Évangélique des Assemblées de Dieu — Anyama Ran-Extension"
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Pasteur principal</label>
+                    <input
+                      value={settingsDraft.principalPastor || ''}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, principalPastor: e.target.value })}
+                      placeholder="Ex. Pasteur Djah Douogoi Nicaise"
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Ville / District</label>
+                    <input
+                      value={settingsDraft.city}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, city: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Adresse</label>
+                    <input
+                      value={settingsDraft.address}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, address: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Téléphone public (optionnel)</label>
+                    <input
+                      value={settingsDraft.phone}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, phone: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">E-mail public (optionnel)</label>
+                    <input
+                      type="email"
+                      value={settingsDraft.email}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, email: e.target.value })}
+                      className="field"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-church-navy">
+                      Résumé historique & fondation (EEADCI)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={settingsDraft.foundationSummary || ''}
+                      onChange={(e) => setSettingsDraft({ ...settingsDraft, foundationSummary: e.target.value })}
+                      className="field py-2.5 min-h-[84px]"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="surface p-5 sm:p-6 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-2xl">Horaires hebdomadaires</h2>
+                  <button type="button" onClick={addScheduleRow} className="btn-secondary min-h-[38px] text-xs">
+                    <Plus className="h-3.5 w-3.5" /> Ajouter un culte
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {(settingsDraft.schedules || []).map((s, idx) => (
+                    <div key={s.id || idx} className="grid gap-2 sm:grid-cols-[140px_160px_1fr_auto] items-center">
+                      <input
+                        value={s.day}
+                        onChange={(e) => updateScheduleRow(idx, 'day', e.target.value)}
+                        placeholder="Jour"
+                        className="field text-sm"
+                      />
+                      <input
+                        value={s.time}
+                        onChange={(e) => updateScheduleRow(idx, 'time', e.target.value)}
+                        placeholder="Horaire"
+                        className="field text-sm"
+                      />
+                      <input
+                        value={s.name}
+                        onChange={(e) => updateScheduleRow(idx, 'name', e.target.value)}
+                        placeholder="Intitulé de la réunion"
+                        className="field text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeScheduleRow(idx)}
+                        className="btn-secondary min-h-[42px] px-3 text-red-700"
+                        aria-label="Retirer cet horaire"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button type="submit" disabled={saving} className="btn-primary">
+                  {saving ? 'Enregistrement...' : 'Enregistrer la configuration'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ==================== CYBERSÉCURITÉ & ACCÈS ==================== */}
+          {activeSubPage === 'securite' && (
+            <div className="space-y-6">
+              <form onSubmit={handleSaveSecurity} className="surface p-5 sm:p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl">Portail caché & Sécurité des URL</h2>
+                  <button type="button" onClick={handleDownloadBackup} className="btn-secondary min-h-[38px] text-xs">
+                    <Download className="h-3.5 w-3.5 text-church-blue" /> Sauvegarde JSON
+                  </button>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Chemin secret (#/...)</label>
+                    <input
+                      value={secDraft.secretGateSlug}
+                      onChange={(e) => setSecDraft({ ...secDraft, secretGateSlug: e.target.value })}
+                      className="field font-mono text-sm"
+                    />
+                    <p className="mt-1 text-xs text-church-muted">
+                      Lien d’accès discret : <code>#/{secDraft.secretGateSlug}</code> (effacé de la barre d’adresse dès ouverture).
+                    </p>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-church-navy">Durée de session (minutes)</label>
+                    <input
+                      type="number"
+                      min={15}
+                      max={1440}
+                      value={secDraft.sessionTimeoutMinutes}
+                      onChange={(e) =>
+                        setSecDraft({ ...secDraft, sessionTimeoutMinutes: Number(e.target.value) || 120 })
+                      }
+                      className="field"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-5 pt-1">
+                  <label className="flex items-center gap-2 text-sm text-church-dark cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={secDraft.enableKeyboardShortcut}
+                      onChange={(e) => setSecDraft({ ...secDraft, enableKeyboardShortcut: e.target.checked })}
+                      className="h-4 w-4 accent-church-blue"
+                    />
+                    Raccourci clavier discret (Ctrl + Maj + A)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-church-dark cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={secDraft.enableFooterTap}
+                      onChange={(e) => setSecDraft({ ...secDraft, enableFooterTap: e.target.checked })}
+                      className="h-4 w-4 accent-church-blue"
+                    />
+                    5 clics sur l’année © en pied de page
+                  </label>
+                </div>
+
+                <div className="flex justify-end">
+                  <button type="submit" disabled={saving} className="btn-primary">
+                    Enregistrer la sécurité
+                  </button>
+                </div>
+              </form>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="surface p-5 sm:p-6 space-y-3">
+                  <h3 className="text-xl flex items-center gap-2">
+                    <Shield className="h-5 w-5 text-church-blue" /> Connexion par compte Google
+                  </h3>
+                  <p className="text-sm text-church-dark leading-relaxed">
+                    L’accès à l’espace administrateur fonctionne uniquement avec <strong>Continuer avec Google</strong> et la liste blanche d’adresses e-mail ci-contre.
+                  </p>
+                  <div className="rounded-xl border border-church-line bg-church-light/60 p-3.5 text-xs space-y-1">
+                    <p className="font-semibold text-church-navy">Session en cours</p>
+                    <p className="text-church-muted">{currentAdmin.name} ({currentAdmin.identifier})</p>
+                    <p className="text-emerald-700 font-medium">Vérifié par Google Sign-In</p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleInviteAdmin} className="surface p-5 sm:p-6 space-y-3">
+                  <h3 className="text-xl flex items-center gap-2">
+                    <UserPlus className="h-5 w-5 text-church-blue" /> Autoriser un e-mail Google
+                  </h3>
+                  <p className="text-xs text-church-muted leading-relaxed">
+                    Ajoutez ici l’adresse Gmail d’un administrateur. Une fois ajoutée, il lui suffit d’appuyer sur <strong>Continuer avec Google</strong> pour accéder au portail.
+                  </p>
+                  <input
+                    type="email"
+                    required
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="Adresse Google (ex. collaborateur@gmail.com)"
+                    className="field text-sm"
+                  />
+                  <input
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    placeholder="Nom complet (optionnel)"
+                    className="field text-sm"
+                  />
+                  <input
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value)}
+                    placeholder="Rôle (ex. Administrateur, Secrétariat, Multimédia)"
+                    className="field text-sm"
+                  />
+                  <button type="submit" disabled={saving} className="btn-primary w-full">
+                    <UserPlus className="h-4 w-4" /> Autoriser cet e-mail Google
+                  </button>
+                </form>
+              </div>
+
+              {lastDispatchInfo && (
+                <div className="surface border-church-blue/35 bg-church-tint/40 p-5 space-y-3 animate-soft-in">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-church-navy">
+                        Accès Google autorisé pour {lastDispatchInfo.email}
+                      </p>
+                      <p className="text-xs text-church-muted">
+                        {lastDispatchInfo.emailSent
+                          ? 'E-mail de confirmation envoyé automatiquement.'
+                          : 'La personne peut déjà entrer via « Continuer avec Google ». Vous pouvez lui envoyer le lien par mail :'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLastDispatchInfo(null)}
+                      className="text-xs text-church-muted hover:text-church-navy"
+                    >
+                      Fermer
+                    </button>
+                  </div>
+
+                  {lastDispatchInfo.mailtoUrl && (
+                    <a href={lastDispatchInfo.mailtoUrl} className="btn-secondary min-h-[40px] text-xs inline-flex">
+                      <Mail className="h-3.5 w-3.5 text-church-blue" /> Envoyer le lien d’accès par e-mail
+                    </a>
+                  )}
+                </div>
+              )}
+
+              <div className="surface p-5 sm:p-6 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xl">E-mails Google autorisés ({invitedAdmins.length})</h3>
+                    <p className="text-xs text-church-muted">
+                      À part les adresses listées ici, personne ne peut accéder à l’espace administrateur.
+                    </p>
+                  </div>
+                </div>
+                <div className="divide-y divide-church-line">
+                  {invitedAdmins.map((inv) => {
+                    const activeAdm = admins.find((a) => a.identifier.toLowerCase() === inv.email.toLowerCase());
+                    const isMe = activeAdm?.id === currentAdmin.id || inv.email.toLowerCase() === currentAdmin.identifier.toLowerCase();
+                    return (
+                      <div key={inv.email} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="font-semibold text-church-navy">{inv.name}</span>
+                            <span className="text-church-muted">({inv.email})</span>
+                            {isMe && <span className="text-xs font-semibold text-church-blue">· Session actuelle</span>}
+                          </div>
+                          <p className="mt-0.5 text-xs text-church-muted">
+                            {inv.role} ·{' '}
+                            <span className={inv.status === 'active' ? 'font-semibold text-emerald-700' : 'font-semibold text-amber-700'}>
+                              {inv.status === 'active' ? 'Actif via Google' : 'Autorisé (en attente de connexion Google)'}
+                            </span>
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {!isMe && (
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => handleSendResetEmailToInvite(inv.email)}
+                              className="btn-secondary min-h-[36px] px-3 text-xs"
+                            >
+                              <Mail className="h-3.5 w-3.5 text-church-blue" />
+                              Envoyer le lien par e-mail
+                            </button>
+                          )}
+                          {!isMe && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const res = await api.removeAdminInvitation(inv.email);
+                                  onSyncSecurityState({
+                                    admins: res.admins,
+                                    invitedAdmins: res.invitedAdmins,
+                                    securityLogs: res.securityLogs
+                                  });
+                                  notify('Autorisation retirée.');
+                                } catch (err) {
+                                  notify(err instanceof Error ? err.message : 'Suppression impossible.', 'err');
+                                }
+                              }}
+                              className="text-xs font-medium text-red-700 hover:underline px-2 py-1"
+                            >
+                              Retirer
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="surface p-5 sm:p-6 space-y-3">
+                <h3 className="text-xl flex items-center gap-2">
+                  <Eye className="h-5 w-5 text-church-blue" /> Journal d’audit sécurité
+                </h3>
+                <div className="max-h-72 overflow-y-auto divide-y divide-church-line text-xs">
+                  {securityLogs.length === 0 ? (
+                    <p className="py-4 text-church-muted">Aucun événement enregistré.</p>
+                  ) : (
+                    securityLogs.map((log) => (
+                      <div key={log.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                        <div>
+                          <span
+                            className={`font-semibold ${
+                              log.severity === 'alert'
+                                ? 'text-red-700'
+                                : log.severity === 'warning'
+                                ? 'text-amber-800'
+                                : 'text-church-navy'
+                            }`}
+                          >
+                            {log.event}
+                          </span>{' '}
+                          <span className="text-church-muted">par {log.actor} — {log.detail}</span>
+                        </div>
+                        <span className="text-church-muted tabular-nums">
+                          {new Date(log.timestamp).toLocaleString('fr-FR')}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 };

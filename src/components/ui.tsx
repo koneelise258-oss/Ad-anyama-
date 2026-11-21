@@ -1,9 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronRight, ArrowLeft, Share2, Check } from 'lucide-react';
-
-/* ------------------------------------------------------------------
-   Petits composants partagés pour garder une mise en page cohérente
-   ------------------------------------------------------------------ */
+import { ChevronRight, ArrowLeft, Share2, Check, Download } from 'lucide-react';
+import { buildDownloadUrl, isDirectVideoUrl, sanitizeUrl } from '../utils/security';
 
 const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 const MONTHS_LONG = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -15,34 +12,47 @@ const parseIso = (value: string): Date | null => {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 };
 
-/** « 2026-10-25 » → « dimanche 25 octobre 2026 ». Les dates déjà rédigées sont conservées telles quelles. */
+/** « 2026-10-25 » → « dimanche 25 octobre 2026 ». */
 export const formatDate = (value: string): string => {
   const d = parseIso(value);
   if (!d) return value;
   return `${DAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
 };
 
-/** Bloc date compact (jour + mois) quand la date est au format ISO, sinon null. */
+/** Horodatage complet automatique : « dimanche 20 nov. 2026 à 14h22 ». */
+export const formatPublishedDateTime = (dateValue: string, publishedAt?: string): string => {
+  if (publishedAt) {
+    const dt = new Date(publishedAt);
+    if (!Number.isNaN(dt.getTime())) {
+      const hh = String(dt.getHours()).padStart(2, '0');
+      const mm = String(dt.getMinutes()).padStart(2, '0');
+      const dayLabel = `${DAYS_LONG[dt.getDay()]} ${dt.getDate()} ${MONTHS_LONG[dt.getMonth()]} ${dt.getFullYear()}`;
+      return `${dayLabel} à ${hh}h${mm}`;
+    }
+  }
+  return formatDate(dateValue);
+};
+
+/** Bloc date compact (jour + mois). */
 export const dateParts = (value: string): { day: string; month: string } | null => {
   const d = parseIso(value);
   if (d) return { day: String(d.getDate()), month: MONTHS[d.getMonth()] };
-  // Dates rédigées : « Vendredi 30 Octobre 2026 », « 14 - 16 Novembre 2026 »
   const m = /(\d{1,2})(?:\s*-\s*\d{1,2})?\s+([A-Za-zéûÉÛ]+)/.exec(value);
   if (!m) return null;
   const idx = MONTHS_LONG.findIndex((x) => x === m[2].toLowerCase());
   return { day: m[1], month: idx >= 0 ? MONTHS[idx] : m[2].slice(0, 4).toLowerCase() };
 };
 
-/** En-tête de page : titre + chapeau. */
+/** En-tête de page : titre + chapeau optimisé mobile & PC. */
 export const PageIntro: React.FC<{ title: string; lead?: string; children?: React.ReactNode }> = ({
   title,
   lead,
   children
 }) => (
   <header className="border-b border-church-line bg-white">
-    <div className="page py-8 sm:py-12">
-      <h1 className="text-3xl sm:text-[2.6rem]">{title}</h1>
-      {lead && <p className="mt-3 max-w-2xl text-[17px] text-church-muted">{lead}</p>}
+    <div className="page py-5 sm:py-9">
+      <h1 className="text-2xl sm:text-[2.35rem]">{title}</h1>
+      {lead && <p className="mt-2 max-w-2xl text-[15px] sm:text-[17px] text-church-muted">{lead}</p>}
       {children}
     </div>
   </header>
@@ -65,41 +75,45 @@ export const SectionHead: React.FC<{ title: string; linkLabel?: string; onLink?:
   </div>
 );
 
-/** Ligne d’informations secondaires (date, heure, orateur…) séparées par un espace, sans puces. */
+/** Ligne d’informations secondaires séparées typographiquement. */
 export const Meta: React.FC<{ items: (React.ReactNode | false | null | undefined)[]; className?: string }> = ({
   items,
   className = ''
-}) => (
-  <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-church-muted ${className}`}>
-    {items.filter(Boolean).map((it, i) => (
-      <span key={i} className="inline-flex items-center gap-1.5">
-        {it}
-      </span>
-    ))}
-  </div>
-);
+}) => {
+  const clean = items.filter(Boolean);
+  return (
+    <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-church-muted ${className}`}>
+      {clean.map((it, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <span aria-hidden="true" className="text-church-line">·</span>}
+          <span className="inline-flex items-center gap-1.5">{it}</span>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
 
-/** Bloc date (jour en grand, mois en dessous). */
+/** Bloc date arrondi (jour en grand, mois en dessous). */
 export const DateBlock: React.FC<{ date: string; className?: string }> = ({ date, className = '' }) => {
   const p = dateParts(date);
   if (!p) return null;
   return (
     <div
-      className={`flex h-16 w-14 shrink-0 flex-col items-center justify-center rounded-md border border-church-line bg-white text-church-navy ${className}`}
+      className={`flex h-16 w-14 shrink-0 flex-col items-center justify-center rounded-2xl border border-church-line bg-church-light/60 text-church-navy ${className}`}
     >
-      <span className="font-serif text-2xl font-semibold leading-none">{p.day}</span>
+      <span className="font-serif text-2xl font-semibold leading-none tabular-nums">{p.day}</span>
       <span className="mt-1 text-xs font-medium text-church-muted">{p.month}</span>
     </div>
   );
 };
 
-/** État vide : dit quoi faire. */
+/** État vide doux et clair. */
 export const EmptyState: React.FC<{ message: string; actionLabel?: string; onAction?: () => void }> = ({
   message,
   actionLabel,
   onAction
 }) => (
-  <div className="surface px-6 py-12 text-center">
+  <div className="surface px-6 py-12 text-center animate-soft-in">
     <p className="text-church-muted">{message}</p>
     {actionLabel && onAction && (
       <button onClick={onAction} className="btn-secondary mt-4">
@@ -117,7 +131,10 @@ export const BackBar: React.FC<{ backLabel: string; onBack: () => void; onShare?
 }) => (
   <div className="border-b border-church-line bg-white">
     <div className="page flex h-14 items-center justify-between gap-3">
-      <button onClick={onBack} className="-ml-2 inline-flex min-h-[44px] items-center gap-2 rounded-md px-2 font-medium text-church-navy hover:text-church-blue">
+      <button
+        onClick={onBack}
+        className="-ml-2 inline-flex min-h-[44px] items-center gap-2 rounded-xl px-2.5 font-medium text-church-navy transition-colors hover:bg-church-tint/50 hover:text-church-blue"
+      >
         <ArrowLeft className="h-5 w-5 text-church-blue" aria-hidden="true" />
         {backLabel}
       </button>
@@ -130,7 +147,7 @@ export const BackBar: React.FC<{ backLabel: string; onBack: () => void; onShare?
   </div>
 );
 
-/** Message de confirmation discret, affiché au-dessus de la barre mobile. */
+/** Message de confirmation discret. */
 export const useToast = () => {
   const [msg, setMsg] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
@@ -141,9 +158,12 @@ export const useToast = () => {
   }, []);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const node = msg ? (
-    <div role="status" className="fixed inset-x-4 bottom-20 z-[60] mx-auto flex max-w-md items-center gap-2 rounded-lg bg-church-navy px-4 py-3 text-[15px] text-white lg:bottom-6">
+    <div
+      role="status"
+      className="fixed inset-x-4 bottom-20 z-[60] mx-auto flex max-w-md items-center gap-2 rounded-2xl bg-church-navy px-4 py-3 text-[15px] text-white shadow-lg lg:bottom-6 animate-soft-in"
+    >
       <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
-      {msg}
+      <span>{msg}</span>
     </div>
   ) : null;
   return { show, node };
@@ -156,9 +176,9 @@ export const BlockTitle: React.FC<{ children: React.ReactNode; id?: string }> = 
   </h2>
 );
 
-/** Visionneuse plein écran pour photos et vidéos (flèches + glisser au doigt). */
+/** Visionneuse plein écran pour photos, vidéos et audios (flèches + glisser au doigt + téléchargement). */
 export const Lightbox: React.FC<{
-  items: { type: 'photo' | 'video'; url: string; caption?: string }[];
+  items: { type: 'photo' | 'video' | 'audio'; url: string; caption?: string }[];
   index: number;
   onClose: () => void;
   onChange: (i: number) => void;
@@ -182,18 +202,34 @@ export const Lightbox: React.FC<{
   });
 
   if (!item) return null;
+  const safeUrl = sanitizeUrl(item.url, true);
+  const isDirectVideo = isDirectVideoUrl(safeUrl);
+  const downloadHref = buildDownloadUrl(safeUrl, item.caption);
+
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-black text-white" role="dialog" aria-modal="true" aria-label="Visionneuse">
-      <div className="flex items-center justify-between p-3">
-        <span className="text-sm text-white/80">
+    <div className="fixed inset-0 z-[70] flex flex-col bg-black/95 text-white" role="dialog" aria-modal="true" aria-label="Visionneuse">
+      <div className="flex items-center justify-between gap-3 p-4">
+        <span className="text-sm text-white/80 tabular-nums">
           {index + 1} / {items.length}
         </span>
-        <button onClick={onClose} className="rounded-md px-3 py-2 text-[15px] font-medium" aria-label="Fermer la visionneuse">
-          Fermer
-        </button>
+        <div className="flex items-center gap-2">
+          {(item.type === 'photo' || item.type === 'audio' || (item.type === 'video' && isDirectVideo)) && downloadHref && (
+            <a
+              href={downloadHref}
+              download
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-3.5 py-2 text-sm font-medium text-white hover:bg-white/25"
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Télécharger
+            </a>
+          )}
+          <button onClick={onClose} className="rounded-xl bg-white/10 px-4 py-2 text-[15px] font-medium hover:bg-white/20" aria-label="Fermer la visionneuse">
+            Fermer
+          </button>
+        </div>
       </div>
       <div
-        className="relative flex flex-1 items-center justify-center overflow-hidden"
+        className="relative flex flex-1 items-center justify-center overflow-hidden px-4"
         onTouchStart={(e) => (startX.current = e.touches[0].clientX)}
         onTouchEnd={(e) => {
           if (startX.current === null) return;
@@ -203,16 +239,33 @@ export const Lightbox: React.FC<{
         }}
       >
         {item.type === 'video' ? (
-          <iframe title={item.caption || 'Vidéo'} src={item.url} className="aspect-video w-full max-w-4xl border-0" allow="encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
+          isDirectVideo ? (
+            <video controls autoPlay src={safeUrl} className="max-h-full w-full max-w-4xl rounded-2xl bg-black" />
+          ) : (
+            <iframe
+              title={item.caption || 'Vidéo'}
+              src={safeUrl}
+              className="aspect-video w-full max-w-4xl rounded-2xl border-0"
+              allow="encrypted-media; picture-in-picture; fullscreen"
+              allowFullScreen
+            />
+          )
+        ) : item.type === 'audio' ? (
+          <div className="w-full max-w-lg rounded-2xl bg-white/10 p-6 text-center space-y-4">
+            <p className="text-base font-medium text-white">{item.caption || 'Enregistrement audio'}</p>
+            <audio controls autoPlay src={safeUrl} className="w-full">
+              Votre navigateur ne lit pas l’audio.
+            </audio>
+          </div>
         ) : (
-          <img src={item.url} alt={item.caption || ''} className="max-h-full max-w-full select-none object-contain" />
+          <img src={safeUrl} alt={item.caption || ''} className="max-h-full max-w-full select-none rounded-xl object-contain" />
         )}
         {items.length > 1 && (
           <>
-            <button onClick={() => go(-1)} className="absolute left-2 top-1/2 hidden -translate-y-1/2 rounded-full bg-white/15 px-3 py-2 sm:block" aria-label="Précédent">
+            <button onClick={() => go(-1)} className="absolute left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-xl hover:bg-white/25 sm:flex" aria-label="Précédent">
               ‹
             </button>
-            <button onClick={() => go(1)} className="absolute right-2 top-1/2 hidden -translate-y-1/2 rounded-full bg-white/15 px-3 py-2 sm:block" aria-label="Suivant">
+            <button onClick={() => go(1)} className="absolute right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-xl hover:bg-white/25 sm:flex" aria-label="Suivant">
               ›
             </button>
           </>

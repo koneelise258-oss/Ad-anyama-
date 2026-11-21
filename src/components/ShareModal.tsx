@@ -9,7 +9,6 @@ interface ShareModalProps {
   summary?: string;
 }
 
-/** Fenêtre de partage (utilisée sur ordinateur ; sur téléphone le menu du système s’ouvre directement). */
 export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, title, url, summary }) => {
   const [copied, setCopied] = useState(false);
 
@@ -45,9 +44,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, title, 
   ];
 
   return (
-    <div className="fixed inset-0 z-[65] flex items-end justify-center bg-church-navy/50 sm:items-center sm:p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[65] flex items-end justify-center bg-church-navy/50 backdrop-blur-[2px] sm:items-center sm:p-4"
+      onClick={onClose}
+    >
       <div
-        className="w-full rounded-t-xl bg-white p-5 pb-8 sm:max-w-md sm:rounded-xl sm:pb-5"
+        className="w-full rounded-t-3xl bg-white p-6 pb-8 shadow-xl sm:max-w-md sm:rounded-3xl sm:pb-6 animate-soft-in"
         role="dialog"
         aria-modal="true"
         aria-labelledby="partage-titre"
@@ -57,19 +59,23 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, title, 
           <h2 id="partage-titre" className="text-2xl">
             Partager
           </h2>
-          <button onClick={onClose} className="-mr-2 -mt-1 rounded-md p-2 text-church-muted hover:text-church-navy" aria-label="Fermer">
+          <button
+            onClick={onClose}
+            className="-mr-2 -mt-1 rounded-xl p-2 text-church-muted hover:bg-church-light hover:text-church-navy"
+            aria-label="Fermer"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
         <p className="mt-1 line-clamp-2 text-church-muted">{title}</p>
 
-        <ul className="mt-4 grid grid-cols-3 gap-2">
+        <ul className="mt-4 grid grid-cols-3 gap-2.5">
           {options.map(({ label, icon: Icon, href, external }) => (
             <li key={label}>
               <a
                 href={href}
                 {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-                className="flex flex-col items-center gap-2 rounded-lg border border-church-line p-3 text-sm font-medium text-church-navy hover:border-church-blue"
+                className="flex flex-col items-center gap-2 rounded-2xl border border-church-line p-3.5 text-sm font-medium text-church-navy transition-colors hover:border-church-blue hover:bg-church-tint/40"
               >
                 <Icon className="h-6 w-6 text-church-blue" aria-hidden="true" />
                 {label}
@@ -90,7 +96,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, title, 
         <label htmlFor="share-url" className="mt-5 block text-sm font-medium">
           Lien direct
         </label>
-        <div className="mt-1 flex gap-2">
+        <div className="mt-1.5 flex gap-2">
           <input id="share-url" readOnly value={url} className="field min-w-0 flex-1 text-sm" onFocus={(e) => e.target.select()} />
           <button onClick={copy} className="btn-primary shrink-0">
             {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
