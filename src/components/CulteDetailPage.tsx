@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { Culte } from '../types';
-import { buildDownloadUrl, isDirectVideoUrl, sanitizeUrl, toSafeYoutubeEmbed } from '../utils/security';
+import {
+  buildDownloadUrl,
+  getFirstDisplayablePhoto,
+  isDirectVideoUrl,
+  sanitizeUrl,
+  toSafeYoutubeEmbed
+} from '../utils/security';
 import { Play, Download, ThumbsUp, Heart, Flag, Headphones, Eye, ExternalLink } from 'lucide-react';
 import { BackBar, BlockTitle, Lightbox, Meta, formatDate, useToast } from './ui';
 import { MediaViewerSection } from './MediaViewerSection';
@@ -49,6 +55,7 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
   const safeVideo = culte.videoUrl ? sanitizeUrl(toSafeYoutubeEmbed(culte.videoUrl), false) : '';
   const safeAudio = culte.audioUrl ? sanitizeUrl(culte.audioUrl, false) : '';
   const isDirectVideo = isDirectVideoUrl(safeVideo);
+  const coverPhoto = getFirstDisplayablePhoto(culte);
 
   const react = (type: ReactionType) => {
     if (reacted.includes(type)) return;
@@ -142,10 +149,11 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
         )}
 
         {/* Vidéo : Afficher ou Télécharger */}
+        {(safeVideo || coverPhoto) && (
         <div className="mt-6 overflow-hidden rounded-2xl bg-church-navy shadow-xs">
-          {culte.hasVideo && safeVideo && playing ? (
+          {safeVideo && playing ? (
             isDirectVideo ? (
-              <video controls autoPlay src={safeVideo} className="aspect-video w-full bg-black object-contain" />
+              <video controls autoPlay playsInline src={safeVideo} className="aspect-video w-full bg-black object-contain" />
             ) : (
               <iframe
                 title={`Vidéo — ${culte.title}`}
@@ -155,14 +163,16 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
                 allowFullScreen
               />
             )
-          ) : sanitizeUrl(culte.coverImage) || (culte.hasVideo && safeVideo) ? (
+          ) : coverPhoto || safeVideo ? (
             <div className="relative">
-              {sanitizeUrl(culte.coverImage) ? (
-                <img src={sanitizeUrl(culte.coverImage)} alt={culte.title} className="aspect-video w-full object-cover" />
+              {coverPhoto ? (
+                <img src={coverPhoto} alt={culte.title} className="aspect-video w-full object-cover" />
+              ) : isDirectVideo ? (
+                <video preload="metadata" muted playsInline src={`${safeVideo}#t=0.5`} className="aspect-video w-full object-cover bg-black" />
               ) : (
                 <div className="aspect-video w-full bg-gradient-to-br from-church-navy to-church-blue/90" />
               )}
-              {culte.hasVideo && safeVideo && (
+              {safeVideo && (
                 <button
                   onClick={() => setPlaying(true)}
                   className="absolute inset-0 flex items-center justify-center bg-church-navy/30 transition-colors hover:bg-church-navy/40"
@@ -177,7 +187,7 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
             </div>
           ) : null}
 
-          {culte.hasVideo && safeVideo && (
+          {safeVideo && (
             <div className="flex flex-wrap items-center justify-between gap-2 bg-white px-4 py-3 border-t border-church-line">
               <span className="text-xs font-medium text-church-muted">
                 Vidéo du culte{culte.videoDuration ? ` · ${culte.videoDuration}` : ''}
@@ -215,6 +225,7 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* Audio : Afficher / Écouter ou Télécharger */}
         {safeAudio && (

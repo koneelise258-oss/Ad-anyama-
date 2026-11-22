@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { EventItem } from '../types';
-import { sanitizeUrl } from '../utils/security';
-import { Clock, MapPin, Check, CalendarDays } from 'lucide-react';
+import { getFirstDirectVideo, getFirstDisplayablePhoto } from '../utils/security';
+import { Clock, MapPin, Check, CalendarDays, Play } from 'lucide-react';
 import { PageIntro, DateBlock, EmptyState } from './ui';
 
 interface EventsViewProps {
@@ -46,7 +46,10 @@ export const EventsView: React.FC<EventsViewProps> = ({ events, onSelectEvent, o
           <EmptyState message="Aucun événement dans cette catégorie." actionLabel="Voir tous les événements" onAction={() => setSelectedCategory('all')} />
         ) : (
           <ul className="space-y-5">
-            {filtered.map((ev) => (
+            {filtered.map((ev) => {
+              const coverPhoto = getFirstDisplayablePhoto(ev);
+              const coverVideo = !coverPhoto ? getFirstDirectVideo(ev) : '';
+              return (
               <li key={ev.id} className="surface surface-interactive overflow-hidden">
                 <div className="grid md:grid-cols-[280px_1fr]">
                   <button
@@ -54,12 +57,27 @@ export const EventsView: React.FC<EventsViewProps> = ({ events, onSelectEvent, o
                     className="group relative block bg-church-navy overflow-hidden"
                     aria-label={ev.title}
                   >
-                    {sanitizeUrl(ev.coverImage) ? (
+                    {coverPhoto ? (
                       <img
-                        src={sanitizeUrl(ev.coverImage)}
+                        src={coverPhoto}
                         alt={`Affiche ${ev.title}`}
                         className="aspect-[16/9] h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 md:aspect-auto"
                       />
+                    ) : coverVideo ? (
+                      <span className="relative block aspect-[16/9] h-full min-h-[150px] w-full bg-black md:aspect-auto">
+                        <video
+                          preload="metadata"
+                          muted
+                          playsInline
+                          src={`${coverVideo}#t=0.5`}
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                        <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25">
+                          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white/95 text-church-navy shadow-md">
+                            <Play className="h-5 w-5 fill-church-navy" aria-hidden="true" />
+                          </span>
+                        </span>
+                      </span>
                     ) : (
                       <span className="flex aspect-[16/9] h-full min-h-[150px] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-church-navy to-church-blue/90 p-5 text-white md:aspect-auto">
                         <CalendarDays className="h-8 w-8 text-white/80" aria-hidden="true" />
@@ -122,7 +140,8 @@ export const EventsView: React.FC<EventsViewProps> = ({ events, onSelectEvent, o
                   </div>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>

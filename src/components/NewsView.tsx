@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NewsItem } from '../types';
-import { sanitizeUrl } from '../utils/security';
-import { ChevronRight } from 'lucide-react';
+import { getFirstDirectVideo, getFirstDisplayablePhoto } from '../utils/security';
+import { ChevronRight, Play } from 'lucide-react';
 import { PageIntro, EmptyState, formatPublishedDateTime } from './ui';
 
 interface NewsViewProps {
@@ -43,20 +43,28 @@ export const NewsView: React.FC<NewsViewProps> = ({ news, onSelectNews }) => {
           <ul className="surface divide-y divide-church-line overflow-hidden">
             {filtered.map((item) => {
               const official = item.category === 'Communiqué officiel';
-              const safeImg = sanitizeUrl(item.coverImage);
+              const safeImg = getFirstDisplayablePhoto(item);
+              const safeVid = !safeImg ? getFirstDirectVideo(item) : '';
               return (
                 <li key={item.id}>
                   <button
                     onClick={() => onSelectNews(item)}
                     className="flex w-full items-center gap-3.5 p-4 text-left transition-colors hover:bg-church-light sm:gap-4 sm:p-6"
                   >
-                    {safeImg && (
+                    {safeImg ? (
                       <img
                         src={safeImg}
                         alt=""
                         className="h-16 w-16 shrink-0 rounded-xl object-cover bg-church-navy sm:h-20 sm:w-24"
                       />
-                    )}
+                    ) : safeVid ? (
+                      <span className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-black sm:h-20 sm:w-24">
+                        <video preload="metadata" muted playsInline src={`${safeVid}#t=0.5`} className="h-full w-full object-cover" />
+                        <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25">
+                          <Play className="h-5 w-5 fill-white text-white" aria-hidden="true" />
+                        </span>
+                      </span>
+                    ) : null}
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs sm:text-sm">
                         <span className={official ? 'font-semibold text-church-blue' : 'text-church-muted'}>

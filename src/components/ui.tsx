@@ -178,14 +178,19 @@ export const BlockTitle: React.FC<{ children: React.ReactNode; id?: string }> = 
 
 /** Visionneuse plein écran pour photos, vidéos et audios (flèches + glisser au doigt + téléchargement). */
 export const Lightbox: React.FC<{
-  items: { type: 'photo' | 'video' | 'audio'; url: string; caption?: string }[];
+  items: { type: 'photo' | 'video' | 'audio'; url: string; fallbackUrl?: string; caption?: string }[];
   index: number;
   onClose: () => void;
   onChange: (i: number) => void;
 }> = ({ items, index, onClose, onChange }) => {
   const startX = useRef<number | null>(null);
+  const [useFallback, setUseFallback] = useState(false);
   const item = items[index];
   const go = (d: number) => onChange((index + d + items.length) % items.length);
+
+  useEffect(() => {
+    setUseFallback(false);
+  }, [index]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -202,9 +207,11 @@ export const Lightbox: React.FC<{
   });
 
   if (!item) return null;
-  const safeUrl = sanitizeUrl(item.url, true);
-  const isDirectVideo = isDirectVideoUrl(safeUrl);
-  const downloadHref = buildDownloadUrl(safeUrl, item.caption);
+  const rawSafeUrl = sanitizeUrl(item.url, true);
+  const safeFallback = item.fallbackUrl ? sanitizeUrl(item.fallbackUrl, false) : '';
+  const safeUrl = useFallback && safeFallback ? safeFallback : rawSafeUrl;
+  const isDirectVideo = !(useFallback && safeFallback) && isDirectVideoUrl(safeUrl);
+  const downloadHref = buildDownloadUrl(rawSafeUrl, item.caption);
 
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-black/95 text-white" role="dialog" aria-modal="true" aria-label="Visionneuse">
@@ -240,7 +247,16 @@ export const Lightbox: React.FC<{
       >
         {item.type === 'video' ? (
           isDirectVideo ? (
-            <video controls autoPlay src={safeUrl} className="max-h-full w-full max-w-4xl rounded-2xl bg-black" />
+            <video
+              controls
+              autoPlay
+              playsInline
+              src={safeUrl}
+              onError={() => {
+                if (safeFallback) setUseFallback(true);
+              }}
+              className="max-h-full w-full max-w-4xl rounded-2xl bg-black"
+            />
           ) : (
             <iframe
               title={item.caption || 'Vidéo'}

@@ -229,6 +229,7 @@ export interface MediaItem {
   id: string;
   type: 'photo' | 'video' | 'audio';
   url: string;
+  fallbackUrl?: string;
   caption?: string;
   duration?: string;
   mimeType?: string;

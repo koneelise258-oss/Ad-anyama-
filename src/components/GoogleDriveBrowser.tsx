@@ -356,38 +356,83 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
           ? undefined
           : currentFolder.id;
 
-      const res = await api.importFromDrive(activeToken, {
-        accountEmail: activeEmail,
-        folderId: folderIdForApi,
-        folderName: currentFolder.name,
-        importKind,
-        files: pickedFiles.map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType })),
-        createAlbum: !onImportedToForm && !targetAlbumId && importKind !== 'document',
-        albumId: targetAlbumId,
-        albumTitle:
-          folderIdForApi ? currentFolder.name : currentFolder.id === 'recentPhotos' ? 'Photos Google Drive' : 'Médias Google Drive',
-        albumCategory
-      });
-      onSyncDriveState({
-        albums: res.albums,
-        driveFolders: res.driveFolders,
-        driveAccounts: res.driveAccounts
-      });
-      if (onImportedToForm && (res.imported.length > 0 || (res.importedDocuments || []).length > 0)) {
-        onImportedToForm(res.imported, res.importedDocuments || []);
+      // Découper en petits lots pour éviter tout dépassement de délai serveur (Vercel) sur les photos/vidéos
+      const batches: DriveItemFile[][] = [];
+      let currentPhotoBatch: DriveItemFile[] = [];
+      for (const f of pickedFiles) {
+        if (f.kind === 'video' || f.kind === 'audio' || f.kind === 'document') {
+          if (currentPhotoBatch.length > 0) {
+            batches.push(currentPhotoBatch);
+            currentPhotoBatch = [];
+          }
+          batches.push([f]);
+        } else {
+          currentPhotoBatch.push(f);
+          if (currentPhotoBatch.length >= 4) {
+            batches.push(currentPhotoBatch);
+            currentPhotoBatch = [];
+          }
+        }
+      }
+      if (currentPhotoBatch.length > 0) batches.push(currentPhotoBatch);
+
+      let activeAlbumId = targetAlbumId;
+      const shouldCreateAlbum = !onImportedToForm && !targetAlbumId && importKind !== 'document';
+      let totalMediaCount = 0;
+      let totalDocsCount = 0;
+      let totalSkipped = 0;
+      const aggregatedMedia: MediaItem[] = [];
+      const aggregatedDocs: CulteDocument[] = [];
+
+      for (const batch of batches) {
+        const res = await api.importFromDrive(activeToken, {
+          accountEmail: activeEmail,
+          folderId: folderIdForApi,
+          folderName: currentFolder.name,
+          importKind,
+          files: batch.map((f) => ({
+            id: f.id,
+            name: f.name,
+            mimeType: f.mimeType,
+            thumbnailLink: f.thumbnailLink
+          })),
+          createAlbum: shouldCreateAlbum && !activeAlbumId,
+          albumId: activeAlbumId,
+          albumTitle:
+            folderIdForApi ? currentFolder.name : currentFolder.id === 'recentPhotos' ? 'Photos Google Drive' : 'Médias Google Drive',
+          albumCategory
+        });
+
+        if (res.album?.id && !activeAlbumId) {
+          activeAlbumId = res.album.id;
+        }
+        totalMediaCount += res.imported.length;
+        totalDocsCount += (res.importedDocuments || []).length;
+        totalSkipped += res.skippedCount || 0;
+        aggregatedMedia.push(...res.imported);
+        aggregatedDocs.push(...(res.importedDocuments || []));
+
+        onSyncDriveState({
+          albums: res.albums,
+          driveFolders: res.driveFolders,
+          driveAccounts: res.driveAccounts
+        });
+      }
+
+      if (onImportedToForm && (aggregatedMedia.length > 0 || aggregatedDocs.length > 0)) {
+        onImportedToForm(aggregatedMedia, aggregatedDocs);
       }
       setSelectedFileIds([]);
-      const mediaCount = res.imported.length;
-      const docsCount = (res.importedDocuments || []).length;
-      if (mediaCount === 0 && docsCount === 0 && res.skippedCount > 0) {
-        onNotify?.(`Ces ${res.skippedCount} élément(s) étaient déjà importés dans cet album.`);
+
+      if (totalMediaCount === 0 && totalDocsCount === 0 && totalSkipped > 0) {
+        onNotify?.(`Ces ${totalSkipped} élément(s) étaient déjà importés dans cet album.`);
       } else {
         onNotify?.(
           `Importation Google Drive réussie : ${
-            docsCount > 0 && mediaCount === 0
-              ? `${docsCount} document(s) entier(s)`
-              : `${mediaCount} média(s)${docsCount > 0 ? ` et ${docsCount} document(s)` : ''}`
-          }${res.skippedCount > 0 ? ` (${res.skippedCount} déjà présent(s))` : ''}.`
+            totalDocsCount > 0 && totalMediaCount === 0
+              ? `${totalDocsCount} document(s) entier(s)`
+              : `${totalMediaCount} média(s)${totalDocsCount > 0 ? ` et ${totalDocsCount} document(s)` : ''}`
+          }${totalSkipped > 0 ? ` (${totalSkipped} déjà présent(s))` : ''}.`
         );
       }
     } catch (err) {

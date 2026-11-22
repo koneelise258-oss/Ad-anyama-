@@ -193,6 +193,11 @@ export const api = {
       }),
       body: file
     });
+    if (res.status === 413) {
+      throw new Error(
+        `« ${file.name} » dépasse la limite d’envoi direct (4,5 Mo sur Vercel). Importez cette vidéo via Google Drive ou YouTube.`
+      );
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(data?.error || `Échec d'envoi pour ${file.name}`);
@@ -378,7 +383,7 @@ export const api = {
       accountEmail: string;
       folderId?: string;
       folderName?: string;
-      files?: Array<{ id: string; name: string; mimeType?: string }>;
+      files?: Array<{ id: string; name: string; mimeType?: string; thumbnailLink?: string }>;
       importKind?: 'all' | 'media' | 'document';
       createAlbum?: boolean;
       albumId?: string;

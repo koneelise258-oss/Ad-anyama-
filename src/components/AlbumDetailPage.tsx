@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AlbumItem } from '../types';
-import { buildDownloadUrl, isDirectVideoUrl, sanitizeUrl } from '../utils/security';
+import { buildDownloadUrl, extractYoutubeThumbnail, isDirectVideoUrl, sanitizeUrl } from '../utils/security';
 import { Play, Headphones, Download, Eye } from 'lucide-react';
 import { BackBar, Lightbox, formatDate } from './ui';
 
@@ -40,6 +40,8 @@ export const AlbumDetailPage: React.FC<AlbumDetailPageProps> = ({ album, onBack,
               const safeUrl = sanitizeUrl(item.url);
               const downloadable = item.type === 'photo' || item.type === 'audio' || (item.type === 'video' && isDirectVideoUrl(safeUrl));
               const dlHref = buildDownloadUrl(safeUrl, item.caption || `${album.title}-${i + 1}`);
+              const isDirectVid = item.type === 'video' && isDirectVideoUrl(safeUrl);
+              const ytThumb = item.type === 'video' ? extractYoutubeThumbnail(safeUrl) : null;
 
               return (
                 <li key={item.id} className="surface overflow-hidden flex flex-col">
@@ -49,11 +51,33 @@ export const AlbumDetailPage: React.FC<AlbumDetailPageProps> = ({ album, onBack,
                     aria-label={item.caption || `Afficher l'élément ${i + 1}`}
                   >
                     {item.type === 'video' ? (
-                      <span className="flex aspect-square w-full flex-col items-center justify-center gap-2 text-white">
-                        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-church-navy transition-transform group-hover:scale-105">
-                          <Play className="h-5 w-5 fill-church-navy" aria-hidden="true" />
+                      <span className="relative block aspect-square w-full overflow-hidden bg-black">
+                        {isDirectVid ? (
+                          <video
+                            preload="metadata"
+                            muted
+                            playsInline
+                            src={`${safeUrl}#t=0.5`}
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          />
+                        ) : ytThumb ? (
+                          <img
+                            src={ytThumb}
+                            alt={item.caption || album.title}
+                            loading="lazy"
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          />
+                        ) : (
+                          <span className="block h-full w-full bg-gradient-to-br from-church-navy to-church-blue/90" />
+                        )}
+                        <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-church-navy/30 text-white transition-colors group-hover:bg-church-navy/40">
+                          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-church-navy shadow-md transition-transform group-hover:scale-105">
+                            <Play className="h-5 w-5 fill-church-navy" aria-hidden="true" />
+                          </span>
+                          <span className="rounded-full bg-black/55 px-2.5 py-0.5 text-xs font-medium">
+                            Vidéo{item.duration ? ` · ${item.duration}` : ''}
+                          </span>
                         </span>
-                        <span className="text-sm font-medium">Vidéo{item.duration ? `, ${item.duration}` : ''}</span>
                       </span>
                     ) : item.type === 'audio' ? (
                       <span className="flex aspect-square w-full flex-col items-center justify-center gap-2 bg-church-light text-church-navy px-3 text-center">
@@ -108,7 +132,11 @@ export const AlbumDetailPage: React.FC<AlbumDetailPageProps> = ({ album, onBack,
 
       {open !== null && (
         <Lightbox
-          items={items.map((it) => ({ ...it, url: sanitizeUrl(it.url) }))}
+          items={items.map((it) => ({
+            ...it,
+            url: sanitizeUrl(it.url),
+            fallbackUrl: it.fallbackUrl ? sanitizeUrl(it.fallbackUrl, false) : undefined
+          }))}
           index={open}
           onChange={setOpen}
           onClose={() => setOpen(null)}

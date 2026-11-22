@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NewsItem } from '../types';
-import { sanitizeUrl } from '../utils/security';
+import { isVideoMediaUrl, sanitizeUrl } from '../utils/security';
 import { Share2, ThumbsUp, MessageCircle, Image as ImageIcon } from 'lucide-react';
 import { BackBar, formatPublishedDateTime, Lightbox, useToast } from './ui';
 import { MediaViewerSection } from './MediaViewerSection';
@@ -38,7 +38,8 @@ export const NewsDetailPage: React.FC<NewsDetailPageProps> = ({
   const [mathCheck, setMathCheck] = useState('');
   const [commentError, setCommentError] = useState<string | null>(null);
 
-  const safeCover = sanitizeUrl(newsItem.coverImage);
+  const rawCover = sanitizeUrl(newsItem.coverImage);
+  const safeCover = rawCover && !isVideoMediaUrl(rawCover) ? rawCover : '';
 
   const handleLike = () => {
     if (hasLiked) {

@@ -1,6 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Culte, CulteServiceType } from '../types';
-import { buildDownloadUrl, isDirectVideoUrl, sanitizeUrl } from '../utils/security';
+import {
+  buildDownloadUrl,
+  getFirstDirectVideo,
+  getFirstDisplayablePhoto,
+  isDirectVideoUrl,
+  sanitizeUrl,
+  toSafeYoutubeEmbed
+} from '../utils/security';
 import {
   CULTE_TYPE_LABELS,
   groupCultesByCategory,
@@ -23,7 +30,7 @@ export const CultesView: React.FC<CultesViewProps> = ({ cultes, onSelectCulte, o
   const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
 
   const hasAnyAudio = useMemo(() => cultes.some((c) => !!sanitizeUrl(c.audioUrl, false)), [cultes]);
-  const hasAnyVideo = useMemo(() => cultes.some((c) => c.hasVideo && !!sanitizeUrl(c.videoUrl, false)), [cultes]);
+  const hasAnyVideo = useMemo(() => cultes.some((c) => !!sanitizeUrl(c.videoUrl, false)), [cultes]);
 
   const filtered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -39,7 +46,7 @@ export const CultesView: React.FC<CultesViewProps> = ({ cultes, onSelectCulte, o
         const matchMedia =
           mediaFilter === 'all' ||
           (mediaFilter === 'audio' && !!sanitizeUrl(c.audioUrl, false)) ||
-          (mediaFilter === 'video' && c.hasVideo && !!sanitizeUrl(c.videoUrl, false));
+          (mediaFilter === 'video' && !!sanitizeUrl(c.videoUrl, false));
         return matchType && matchSearch && matchMedia;
       })
     );
@@ -56,10 +63,12 @@ export const CultesView: React.FC<CultesViewProps> = ({ cultes, onSelectCulte, o
   };
 
   const renderCulteCard = (culte: Culte) => {
-    const safeVideo = culte.videoUrl ? sanitizeUrl(culte.videoUrl, false) : '';
+    const safeVideo = culte.videoUrl ? sanitizeUrl(toSafeYoutubeEmbed(culte.videoUrl), false) : '';
     const safeAudio = culte.audioUrl ? sanitizeUrl(culte.audioUrl, false) : '';
     const isPlayingHere = playingVideoId === culte.id && !!safeVideo;
     const isDirectVideo = isDirectVideoUrl(safeVideo);
+    const coverPhoto = getFirstDisplayablePhoto(culte);
+    const coverDirectVideo = !coverPhoto ? getFirstDirectVideo(culte) : '';
     const sType = inferCulteServiceType(culte);
     const typeLabel =
       sType === 'evenement' && culte.eventLabel
@@ -73,7 +82,7 @@ export const CultesView: React.FC<CultesViewProps> = ({ cultes, onSelectCulte, o
           <div className="relative bg-church-navy">
             {isPlayingHere ? (
               isDirectVideo ? (
-                <video controls autoPlay src={safeVideo} className="aspect-video h-full w-full bg-black object-contain" />
+                <video controls autoPlay playsInline src={safeVideo} className="aspect-video h-full w-full bg-black object-contain" />
               ) : (
                 <iframe
                   title={`Vidéo — ${culte.title}`}
@@ -86,17 +95,25 @@ export const CultesView: React.FC<CultesViewProps> = ({ cultes, onSelectCulte, o
             ) : (
               <button
                 onClick={() => {
-                  if (culte.hasVideo && safeVideo) setPlayingVideoId(culte.id);
+                  if (safeVideo) setPlayingVideoId(culte.id);
                   else onSelectCulte(culte);
                 }}
                 className="group relative block h-full w-full"
-                aria-label={culte.hasVideo && safeVideo ? `Lire la vidéo : ${culte.title}` : culte.title}
+                aria-label={safeVideo ? `Lire la vidéo : ${culte.title}` : culte.title}
               >
-                {sanitizeUrl(culte.coverImage) ? (
+                {coverPhoto ? (
                   <img
-                    src={sanitizeUrl(culte.coverImage)}
+                    src={coverPhoto}
                     alt={culte.title}
                     className="aspect-video h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] sm:aspect-auto"
+                  />
+                ) : coverDirectVideo ? (
+                  <video
+                    preload="metadata"
+                    muted
+                    playsInline
+                    src={`${coverDirectVideo}#t=0.5`}
+                    className="aspect-video h-full w-full object-cover bg-black sm:aspect-auto"
                   />
                 ) : (
                   <span className="flex aspect-video h-full min-h-[170px] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-church-navy to-church-blue/90 p-5 text-center text-white sm:aspect-auto">
@@ -106,7 +123,7 @@ export const CultesView: React.FC<CultesViewProps> = ({ cultes, onSelectCulte, o
                     )}
                   </span>
                 )}
-                {culte.hasVideo && safeVideo && (
+                {safeVideo && (
                   <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25 transition-colors group-hover:bg-church-navy/35">
                     <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-church-navy shadow-md">
                       <Play className="h-3.5 w-3.5 fill-church-navy" aria-hidden="true" />
@@ -176,7 +193,7 @@ export const CultesView: React.FC<CultesViewProps> = ({ cultes, onSelectCulte, o
                 )}
               </span>
               <span className="flex flex-wrap items-center gap-1.5">
-                {culte.hasVideo && safeVideo && isDirectVideo && (
+                {safeVideo && isDirectVideo && (
                   <a
                     href={buildDownloadUrl(safeVideo, `${culte.title}-video`)}
                     download

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 60,
+      "includeFiles": "firebase-applet-config.json"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/uploads/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/((?!api/|uploads/|assets/|logos/|push-sw\\.js|sw\\.js|workbox-.*|registerSW\\.js|manifest\\.webmanifest|apple-touch-icon\\.png|pwa-.*|eeadci-logo\\.png|favicon\\.ico).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

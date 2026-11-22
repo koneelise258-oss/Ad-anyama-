@@ -11,7 +11,13 @@ import {
   ChurchSettings
 } from '../types';
 import { DEFAULT_CHURCH_SETTINGS } from '../mockData';
-import { sanitizeUrl } from '../utils/security';
+import {
+  getFirstDirectVideo,
+  getFirstDisplayablePhoto,
+  isDirectVideoUrl,
+  sanitizeUrl,
+  toSafeYoutubeEmbed
+} from '../utils/security';
 import { CULTE_TYPE_LABELS, inferCulteServiceType, sortCultesByDateDesc } from '../utils/cultes';
 import {
   Play,
@@ -76,9 +82,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const featuredAlbums = albums.slice(0, 4);
   const sections = churchSettings.homeSections || DEFAULT_CHURCH_SETTINGS.homeSections!;
 
-  const safeVideoUrl = latestCulte?.videoUrl ? sanitizeUrl(latestCulte.videoUrl, false) : '';
+  const safeVideoUrl = latestCulte?.videoUrl ? sanitizeUrl(toSafeYoutubeEmbed(latestCulte.videoUrl), false) : '';
   const safeAudioUrl = latestCulte?.audioUrl ? sanitizeUrl(latestCulte.audioUrl, false) : '';
-  const isDirectVideoFile = /\.(mp4|webm)(\?|$)/i.test(safeVideoUrl) || safeVideoUrl.startsWith('/uploads/');
+  const isDirectVideoFile = isDirectVideoUrl(safeVideoUrl);
+  const latestCulteCover = latestCulte ? getFirstDisplayablePhoto(latestCulte) : '';
 
   return (
     <div className="w-full space-y-8 sm:space-y-11">
@@ -214,9 +221,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <>
               <article className="surface grid overflow-hidden md:grid-cols-[1.05fr_1.2fr]">
                 <div className="relative bg-church-navy">
-                  {latestCulte.hasVideo && safeVideoUrl && inlineVideoPlaying ? (
+                  {safeVideoUrl && inlineVideoPlaying ? (
                     isDirectVideoFile ? (
-                      <video controls autoPlay src={safeVideoUrl} className="aspect-video h-full w-full bg-black object-contain" />
+                      <video controls autoPlay playsInline src={safeVideoUrl} className="aspect-video h-full w-full bg-black object-contain" />
                     ) : (
                       <iframe
                         title={`Vidéo — ${latestCulte.title}`}
@@ -229,17 +236,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   ) : (
                     <button
                       onClick={() => {
-                        if (latestCulte.hasVideo && safeVideoUrl) setInlineVideoPlaying(true);
+                        if (safeVideoUrl) setInlineVideoPlaying(true);
                         else onSelectCulte(latestCulte);
                       }}
                       className="group relative block h-full w-full"
-                      aria-label={latestCulte.hasVideo ? `Lire la vidéo : ${latestCulte.title}` : latestCulte.title}
+                      aria-label={safeVideoUrl ? `Lire la vidéo : ${latestCulte.title}` : latestCulte.title}
                     >
-                      {sanitizeUrl(latestCulte.coverImage) ? (
+                      {latestCulteCover ? (
                         <img
-                          src={sanitizeUrl(latestCulte.coverImage)}
+                          src={latestCulteCover}
                           alt={latestCulte.title}
                           className="aspect-video h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] md:aspect-auto"
+                        />
+                      ) : isDirectVideoFile && safeVideoUrl ? (
+                        <video
+                          preload="metadata"
+                          muted
+                          playsInline
+                          src={`${safeVideoUrl}#t=0.5`}
+                          className="aspect-video h-full w-full bg-black object-cover md:aspect-auto"
                         />
                       ) : (
                         <div className="flex aspect-video h-full min-h-[200px] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-church-navy to-church-blue/90 p-6 text-center text-white md:aspect-auto">
@@ -249,7 +264,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                           )}
                         </div>
                       )}
-                      {latestCulte.hasVideo && safeVideoUrl && (
+                      {safeVideoUrl && (
                         <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25 transition-colors group-hover:bg-church-navy/35">
                           <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-xs sm:text-sm font-semibold text-church-navy shadow-md">
                             <Play className="h-4 w-4 fill-church-navy" aria-hidden="true" />
@@ -422,18 +437,28 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
               ) : (
                 <div className="space-y-3.5">
-                  {upcomingEvents.map((ev) => (
+                  {upcomingEvents.map((ev) => {
+                    const evPhoto = getFirstDisplayablePhoto(ev);
+                    const evVideo = !evPhoto ? getFirstDirectVideo(ev) : '';
+                    return (
                     <article key={ev.id} className="surface surface-interactive overflow-hidden">
                       <button
                         onClick={() => onSelectEvent(ev)}
                         className="group flex w-full items-center gap-3.5 p-3.5 text-left sm:gap-4 sm:p-4"
                       >
-                        {ev.coverImage && sanitizeUrl(ev.coverImage) ? (
+                        {evPhoto ? (
                           <img
-                            src={sanitizeUrl(ev.coverImage)}
+                            src={evPhoto}
                             alt={`Affiche ${ev.title}`}
                             className="h-16 w-16 shrink-0 rounded-xl object-cover bg-church-navy sm:h-20 sm:w-24"
                           />
+                        ) : evVideo ? (
+                          <span className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-black sm:h-20 sm:w-24">
+                            <video preload="metadata" muted playsInline src={`${evVideo}#t=0.5`} className="h-full w-full object-cover" />
+                            <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25">
+                              <Play className="h-4 w-4 fill-white text-white" aria-hidden="true" />
+                            </span>
+                          </span>
                         ) : (
                           <DateBlock date={ev.date} />
                         )}
@@ -451,7 +476,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         <ChevronRight className="h-5 w-5 shrink-0 text-church-muted" aria-hidden="true" />
                       </button>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -465,19 +491,29 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
               ) : (
                 <ul className="surface divide-y divide-church-line overflow-hidden">
-                  {latestNews.map((n) => (
+                  {latestNews.map((n) => {
+                    const nPhoto = getFirstDisplayablePhoto(n);
+                    const nVideo = !nPhoto ? getFirstDirectVideo(n) : '';
+                    return (
                     <li key={n.id}>
                       <button
                         onClick={() => onSelectNews(n)}
                         className="flex w-full items-center gap-3.5 p-3.5 sm:p-4 text-left transition-colors hover:bg-church-light"
                       >
-                        {n.coverImage && sanitizeUrl(n.coverImage) && (
+                        {nPhoto ? (
                           <img
-                            src={sanitizeUrl(n.coverImage)}
+                            src={nPhoto}
                             alt=""
                             className="h-14 w-14 sm:h-16 sm:w-16 shrink-0 rounded-xl object-cover bg-church-navy"
                           />
-                        )}
+                        ) : nVideo ? (
+                          <span className="relative h-14 w-14 sm:h-16 sm:w-16 shrink-0 overflow-hidden rounded-xl bg-black">
+                            <video preload="metadata" muted playsInline src={`${nVideo}#t=0.5`} className="h-full w-full object-cover" />
+                            <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25">
+                              <Play className="h-4 w-4 fill-white text-white" aria-hidden="true" />
+                            </span>
+                          </span>
+                        ) : null}
                         <span className="min-w-0 flex-1">
                           <span className="flex flex-wrap items-center gap-x-2 text-xs">
                             <span className={n.category === 'Communiqué officiel' ? 'font-semibold text-church-blue' : 'text-church-muted'}>
@@ -493,7 +529,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         <ChevronRight className="h-5 w-5 shrink-0 text-church-muted" aria-hidden="true" />
                       </button>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -506,26 +543,52 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <section className="page">
           <SectionHead title="En images" linkLabel="Toute la galerie" onLink={() => onNavigate('galerie')} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {featuredAlbums.map((alb) => (
+            {featuredAlbums.map((alb) => {
+              const albPhoto = getFirstDisplayablePhoto(alb);
+              const albVideo = !albPhoto ? getFirstDirectVideo(alb) : '';
+              return (
               <button
                 key={alb.id}
                 onClick={() => onSelectAlbum(alb)}
                 className="surface surface-interactive group block w-full overflow-hidden text-left"
               >
                 <span className="relative block overflow-hidden bg-church-navy">
-                  {sanitizeUrl(alb.coverImage) ? (
+                  {albPhoto ? (
                     <img
-                      src={sanitizeUrl(alb.coverImage)}
+                      src={albPhoto}
                       alt={alb.title}
                       className="aspect-[16/10] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03] sm:aspect-[4/3]"
                     />
+                  ) : albVideo ? (
+                    <span className="relative block aspect-[16/10] w-full bg-black sm:aspect-[4/3]">
+                      <video
+                        preload="metadata"
+                        muted
+                        playsInline
+                        src={`${albVideo}#t=0.5`}
+                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                      />
+                      <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25">
+                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-church-navy shadow-md">
+                          <Play className="h-4 w-4 fill-church-navy" aria-hidden="true" />
+                        </span>
+                      </span>
+                    </span>
                   ) : (
                     <span className="flex aspect-[16/10] w-full items-center justify-center bg-gradient-to-br from-church-navy to-church-blue/90 sm:aspect-[4/3]">
-                      <Images className="h-9 w-9 text-white/75" aria-hidden="true" />
+                      {alb.type === 'video' ? (
+                        <Play className="h-9 w-9 text-white/80" aria-hidden="true" />
+                      ) : (
+                        <Images className="h-9 w-9 text-white/75" aria-hidden="true" />
+                      )}
                     </span>
                   )}
                   <span className="absolute bottom-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-0.5 text-xs font-semibold text-church-navy shadow-xs">
-                    <Images className="h-3.5 w-3.5 text-church-blue" aria-hidden="true" />
+                    {alb.type === 'video' ? (
+                      <Play className="h-3.5 w-3.5 text-church-blue" aria-hidden="true" />
+                    ) : (
+                      <Images className="h-3.5 w-3.5 text-church-blue" aria-hidden="true" />
+                    )}
                     {alb.items?.length || alb.mediaCount || 0}
                   </span>
                 </span>
@@ -536,7 +599,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <span className="mt-0.5 block text-xs text-church-muted">{formatDate(alb.date)}</span>
                 </span>
               </button>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

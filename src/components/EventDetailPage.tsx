@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { EventItem } from '../types';
-import { sanitizeUrl } from '../utils/security';
+import { isVideoMediaUrl, sanitizeUrl } from '../utils/security';
 import { Clock, MapPin, User, CalendarPlus, Check, ThumbsUp, MessageCircle, BarChart3, CheckCircle2, Image as ImageIcon } from 'lucide-react';
 import { BackBar, BlockTitle, DateBlock, Lightbox, useToast } from './ui';
 import { MediaViewerSection } from './MediaViewerSection';
@@ -110,7 +110,8 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
   const poll = event.poll;
   const totalVotes = poll ? Math.max(poll.totalVotes || 0, poll.options.reduce((acc, curr) => acc + curr.votes, 0)) : 0;
   const commentsList = event.comments || [];
-  const safePoster = sanitizeUrl(event.coverImage);
+  const rawPoster = sanitizeUrl(event.coverImage);
+  const safePoster = rawPoster && !isVideoMediaUrl(rawPoster) ? rawPoster : '';
 
   return (
     <div>

@@ -25,7 +25,15 @@ import {
 } from '../types';
 import { DEFAULT_CHURCH_SETTINGS, DEFAULT_HERO_CONTENT, DEFAULT_SITE_IMAGES } from '../mockData';
 import { api } from '../services/api';
-import { extractYoutubeThumbnail, sanitizeUrl, toSafeYoutubeEmbed } from '../utils/security';
+import {
+  extractYoutubeThumbnail,
+  getFirstDirectVideo,
+  getFirstDisplayablePhoto,
+  isDirectVideoUrl,
+  isVideoMediaUrl,
+  sanitizeUrl,
+  toSafeYoutubeEmbed
+} from '../utils/security';
 import { CULTE_TYPE_LABELS, inferCulteServiceType, sortCultesByDateDesc } from '../utils/cultes';
 import { formatPublishedDateTime } from './ui';
 import { MediaBatchUploader } from './MediaBatchUploader';
@@ -467,9 +475,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
     setSaving(true);
     try {
+      const safeCover =
+        editingAlbum.coverImage && !isVideoMediaUrl(editingAlbum.coverImage)
+          ? editingAlbum.coverImage
+          : getFirstDisplayablePhoto(editingAlbum);
       const payload: AlbumItem = {
         ...editingAlbum,
-        coverImage: editingAlbum.coverImage || editingAlbum.items[0]?.url || '',
+        coverImage: safeCover || '',
         mediaCount: editingAlbum.items.length
       };
       const exists = albums.some((a) => a.id === payload.id);
@@ -1346,6 +1358,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     className="field text-sm"
                   />
                 </div>
+                {sanitizeUrl(editingCulte.audioUrl, false) && (
+                  <div className="rounded-xl border border-church-line bg-church-light/60 p-2.5">
+                    <audio controls preload="metadata" src={sanitizeUrl(editingCulte.audioUrl, false)} className="h-9 w-full" />
+                  </div>
+                )}
               </div>
 
               {/* Vidéo directe */}
@@ -1382,6 +1399,26 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     }
                   }}
                 />
+                {sanitizeUrl(editingCulte.videoUrl, false) && (() => {
+                  const vidEmbed = sanitizeUrl(toSafeYoutubeEmbed(editingCulte.videoUrl || ''), false);
+                  if (!vidEmbed) return null;
+                  return isDirectVideoUrl(vidEmbed) ? (
+                    <video
+                      controls
+                      preload="metadata"
+                      playsInline
+                      src={vidEmbed}
+                      className="aspect-video w-full max-w-md rounded-xl bg-black object-contain"
+                    />
+                  ) : (
+                    <iframe
+                      title="Aperçu vidéo du culte"
+                      src={vidEmbed}
+                      className="aspect-video w-full max-w-md rounded-xl border border-church-line"
+                      allowFullScreen
+                    />
+                  );
+                })()}
               </div>
 
               {/* Image de couverture & Lot de photos */}
@@ -1452,6 +1489,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   />
                 )}
 
+                {editingCulte.coverImage && sanitizeUrl(editingCulte.coverImage) && (
+                  <div className="relative inline-block">
+                    <img
+                      src={sanitizeUrl(editingCulte.coverImage)}
+                      alt="Couverture du culte"
+                      className="h-36 rounded-xl border border-church-line object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setEditingCulte({ ...editingCulte, coverImage: '' })}
+                      className="absolute right-1.5 top-1.5 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
+                      aria-label="Retirer l'image de couverture"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <p className="mb-2 text-xs font-semibold text-church-muted">Image de couverture</p>
@@ -1469,7 +1524,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       mode="photos"
                       onUploadedFiles={(res) => {
                         setEditingCulte((prev) =>
-                          prev ? { ...prev, photos: [...prev.photos, ...res.map((r) => r.url)] } : prev
+                          prev
+                            ? {
+                                ...prev,
+                                photos: [...prev.photos, ...res.map((r) => r.url)],
+                                coverImage: prev.coverImage || res[0]?.url || ''
+                              }
+                            : prev
                         );
                       }}
                     />
@@ -1503,32 +1564,39 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     <p className="text-xs font-semibold text-church-navy">
                       Vidéos & Audios complémentaires ({editingCulte.mediaItems!.length})
                     </p>
-                    <ul className="divide-y divide-church-line rounded-xl border border-church-line">
-                      {editingCulte.mediaItems!.map((m, idx) => (
-                        <li key={m.id || idx} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
-                          <span className="flex min-w-0 items-center gap-2 truncate">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {editingCulte.mediaItems!.map((m, idx) => {
+                        const safeM = sanitizeUrl(toSafeYoutubeEmbed(m.url), false);
+                        return (
+                          <div key={m.id || idx} className="relative rounded-xl border border-church-line p-2.5 space-y-2 bg-church-light/40">
+                            <div className="flex items-center justify-between gap-2 text-xs font-semibold text-church-navy">
+                              <span className="truncate">{m.caption || (m.type === 'video' ? 'Vidéo' : 'Audio')}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingCulte({
+                                    ...editingCulte,
+                                    mediaItems: (editingCulte.mediaItems || []).filter((_, i) => i !== idx)
+                                  })
+                                }
+                                className="shrink-0 text-red-700 hover:underline"
+                              >
+                                Retirer
+                              </button>
+                            </div>
                             {m.type === 'video' ? (
-                              <Film className="h-4 w-4 shrink-0 text-church-blue" />
+                              isDirectVideoUrl(safeM) ? (
+                                <video controls preload="metadata" playsInline src={safeM} className="aspect-video w-full rounded-lg bg-black object-contain" />
+                              ) : (
+                                <iframe title={m.caption || 'Vidéo'} src={safeM} className="aspect-video w-full rounded-lg border-0" allowFullScreen />
+                              )
                             ) : (
-                              <Headphones className="h-4 w-4 shrink-0 text-church-blue" />
+                              <audio controls preload="metadata" src={sanitizeUrl(m.url, false)} className="h-9 w-full" />
                             )}
-                            <span className="truncate">{m.caption || (m.type === 'video' ? 'Vidéo' : 'Audio')}</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setEditingCulte({
-                                ...editingCulte,
-                                mediaItems: (editingCulte.mediaItems || []).filter((_, i) => i !== idx)
-                              })
-                            }
-                            className="shrink-0 text-xs text-red-700 hover:underline"
-                          >
-                            Retirer
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1855,7 +1923,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                 <div className="grid gap-4 border-t border-church-line pt-3 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-church-muted">Vidéo (YouTube ou fichier MP4)</label>
+                    <label className="block text-xs font-semibold text-church-muted">Vidéo principale (YouTube ou fichier MP4)</label>
                     <input
                       value={editingEvent.videoUrl || ''}
                       onChange={(e) => setEditingEvent({ ...editingEvent, videoUrl: e.target.value })}
@@ -1863,12 +1931,35 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       className="field text-sm"
                     />
                     <MediaBatchUploader
-                      mode="video"
-                      allowFolder={false}
+                      mode="videos"
+                      label="Importer vidéo(s) depuis l’appareil"
                       onUploadedFiles={(res) => {
-                        if (res[0]) setEditingEvent((prev) => (prev ? { ...prev, videoUrl: res[0].url } : prev));
+                        if (res.length === 0) return;
+                        setEditingEvent((prev) => {
+                          if (!prev) return prev;
+                          let nextMain = prev.videoUrl || '';
+                          const extra: MediaItem[] = [];
+                          res.forEach((r, i) => {
+                            if (!nextMain) nextMain = r.url;
+                            else extra.push({ id: `evt-vid-${Date.now()}-${i}`, type: 'video', url: r.url, caption: r.name });
+                          });
+                          return {
+                            ...prev,
+                            videoUrl: nextMain,
+                            mediaItems: [...(prev.mediaItems || []), ...extra]
+                          };
+                        });
                       }}
                     />
+                    {sanitizeUrl(editingEvent.videoUrl, false) && (() => {
+                      const vidEmbed = sanitizeUrl(toSafeYoutubeEmbed(editingEvent.videoUrl || ''), false);
+                      if (!vidEmbed) return null;
+                      return isDirectVideoUrl(vidEmbed) ? (
+                        <video controls preload="metadata" playsInline src={vidEmbed} className="aspect-video w-full rounded-xl bg-black object-contain" />
+                      ) : (
+                        <iframe title="Aperçu vidéo événement" src={vidEmbed} className="aspect-video w-full rounded-xl border border-church-line" allowFullScreen />
+                      );
+                    })()}
                   </div>
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold text-church-muted">Audio (MP3, WAV, M4A)</label>
@@ -1885,6 +1976,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         if (res[0]) setEditingEvent((prev) => (prev ? { ...prev, audioUrl: res[0].url } : prev));
                       }}
                     />
+                    {sanitizeUrl(editingEvent.audioUrl, false) && (
+                      <audio controls preload="metadata" src={sanitizeUrl(editingEvent.audioUrl, false)} className="h-9 w-full" />
+                    )}
                   </div>
                 </div>
 
@@ -1893,16 +1987,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     <p className="text-xs font-semibold text-church-navy">
                       Galerie médias de l’événement ({editingEvent.mediaItems!.length})
                     </p>
-                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                      {editingEvent.mediaItems!.map((m, idx) => (
-                        <div key={m.id || idx} className="relative rounded-xl border border-church-line p-1.5">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {editingEvent.mediaItems!.map((m, idx) => {
+                        const safeM = sanitizeUrl(toSafeYoutubeEmbed(m.url), false);
+                        return (
+                        <div key={m.id || idx} className="relative rounded-xl border border-church-line p-2 space-y-1.5 bg-white">
                           {m.type === 'photo' ? (
                             <img src={sanitizeUrl(m.url)} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+                          ) : m.type === 'video' ? (
+                            isDirectVideoUrl(safeM) ? (
+                              <video controls preload="metadata" playsInline src={safeM} className="aspect-video w-full rounded-lg bg-black object-contain" />
+                            ) : (
+                              <iframe title={m.caption || 'Vidéo'} src={safeM} className="aspect-video w-full rounded-lg border-0" allowFullScreen />
+                            )
                           ) : (
-                            <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 rounded-lg bg-church-navy px-2 text-center text-xs text-white">
-                              {m.type === 'video' ? <Film className="h-5 w-5" /> : <Headphones className="h-5 w-5" />}
-                              <span className="line-clamp-2">{m.caption || (m.type === 'video' ? 'Vidéo' : 'Audio')}</span>
+                            <div className="flex flex-col gap-1.5 rounded-lg bg-church-light p-2.5">
+                              <span className="flex items-center gap-1.5 text-xs font-semibold text-church-navy">
+                                <Headphones className="h-4 w-4 text-church-blue shrink-0" />
+                                <span className="truncate">{m.caption || 'Audio'}</span>
+                              </span>
+                              <audio controls preload="metadata" src={sanitizeUrl(m.url, false)} className="h-8 w-full" />
                             </div>
+                          )}
+                          {m.caption && (
+                            <p className="truncate text-[11px] font-medium text-church-muted px-0.5">{m.caption}</p>
                           )}
                           <button
                             type="button"
@@ -1912,13 +2020,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                 mediaItems: (editingEvent.mediaItems || []).filter((_, i) => i !== idx)
                               })
                             }
-                            className="absolute right-2 top-2 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
+                            className="absolute right-2.5 top-2.5 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
                             aria-label="Retirer ce média"
                           >
                             <X className="h-3.5 w-3.5" />
                           </button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2268,7 +2377,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                 <div className="grid gap-4 border-t border-church-line pt-3 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-church-muted">Vidéo (YouTube ou fichier MP4)</label>
+                    <label className="block text-xs font-semibold text-church-muted">Vidéo principale (YouTube ou fichier MP4)</label>
                     <input
                       value={editingNews.videoUrl || ''}
                       onChange={(e) => setEditingNews({ ...editingNews, videoUrl: e.target.value })}
@@ -2276,12 +2385,35 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       className="field text-sm"
                     />
                     <MediaBatchUploader
-                      mode="video"
-                      allowFolder={false}
+                      mode="videos"
+                      label="Importer vidéo(s) depuis l’appareil"
                       onUploadedFiles={(res) => {
-                        if (res[0]) setEditingNews((prev) => (prev ? { ...prev, videoUrl: res[0].url } : prev));
+                        if (res.length === 0) return;
+                        setEditingNews((prev) => {
+                          if (!prev) return prev;
+                          let nextMain = prev.videoUrl || '';
+                          const extra: MediaItem[] = [];
+                          res.forEach((r, i) => {
+                            if (!nextMain) nextMain = r.url;
+                            else extra.push({ id: `news-vid-${Date.now()}-${i}`, type: 'video', url: r.url, caption: r.name });
+                          });
+                          return {
+                            ...prev,
+                            videoUrl: nextMain,
+                            mediaItems: [...(prev.mediaItems || []), ...extra]
+                          };
+                        });
                       }}
                     />
+                    {sanitizeUrl(editingNews.videoUrl, false) && (() => {
+                      const vidEmbed = sanitizeUrl(toSafeYoutubeEmbed(editingNews.videoUrl || ''), false);
+                      if (!vidEmbed) return null;
+                      return isDirectVideoUrl(vidEmbed) ? (
+                        <video controls preload="metadata" playsInline src={vidEmbed} className="aspect-video w-full rounded-xl bg-black object-contain" />
+                      ) : (
+                        <iframe title="Aperçu vidéo actualité" src={vidEmbed} className="aspect-video w-full rounded-xl border border-church-line" allowFullScreen />
+                      );
+                    })()}
                   </div>
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold text-church-muted">Audio (MP3, WAV, M4A)</label>
@@ -2298,6 +2430,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         if (res[0]) setEditingNews((prev) => (prev ? { ...prev, audioUrl: res[0].url } : prev));
                       }}
                     />
+                    {sanitizeUrl(editingNews.audioUrl, false) && (
+                      <audio controls preload="metadata" src={sanitizeUrl(editingNews.audioUrl, false)} className="h-9 w-full" />
+                    )}
                   </div>
                 </div>
 
@@ -2306,16 +2441,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     <p className="text-xs font-semibold text-church-navy">
                       Médias joints à l’actualité ({editingNews.mediaItems!.length})
                     </p>
-                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                      {editingNews.mediaItems!.map((m, idx) => (
-                        <div key={m.id || idx} className="relative rounded-xl border border-church-line p-1.5">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {editingNews.mediaItems!.map((m, idx) => {
+                        const safeM = sanitizeUrl(toSafeYoutubeEmbed(m.url), false);
+                        return (
+                        <div key={m.id || idx} className="relative rounded-xl border border-church-line p-2 space-y-1.5 bg-white">
                           {m.type === 'photo' ? (
                             <img src={sanitizeUrl(m.url)} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+                          ) : m.type === 'video' ? (
+                            isDirectVideoUrl(safeM) ? (
+                              <video controls preload="metadata" playsInline src={safeM} className="aspect-video w-full rounded-lg bg-black object-contain" />
+                            ) : (
+                              <iframe title={m.caption || 'Vidéo'} src={safeM} className="aspect-video w-full rounded-lg border-0" allowFullScreen />
+                            )
                           ) : (
-                            <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 rounded-lg bg-church-navy px-2 text-center text-xs text-white">
-                              {m.type === 'video' ? <Film className="h-5 w-5" /> : <Headphones className="h-5 w-5" />}
-                              <span className="line-clamp-2">{m.caption || (m.type === 'video' ? 'Vidéo' : 'Audio')}</span>
+                            <div className="flex flex-col gap-1.5 rounded-lg bg-church-light p-2.5">
+                              <span className="flex items-center gap-1.5 text-xs font-semibold text-church-navy">
+                                <Headphones className="h-4 w-4 text-church-blue shrink-0" />
+                                <span className="truncate">{m.caption || 'Audio'}</span>
+                              </span>
+                              <audio controls preload="metadata" src={sanitizeUrl(m.url, false)} className="h-8 w-full" />
                             </div>
+                          )}
+                          {m.caption && (
+                            <p className="truncate text-[11px] font-medium text-church-muted px-0.5">{m.caption}</p>
                           )}
                           <button
                             type="button"
@@ -2325,13 +2474,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                 mediaItems: (editingNews.mediaItems || []).filter((_, i) => i !== idx)
                               })
                             }
-                            className="absolute right-2 top-2 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
+                            className="absolute right-2.5 top-2.5 rounded-full bg-white/95 p-1 text-red-700 shadow-xs"
                             aria-label="Retirer ce média"
                           >
                             <X className="h-3.5 w-3.5" />
                           </button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2414,17 +2564,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </div>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {albums.map((alb) => (
+                  {albums.map((alb) => {
+                    const albPhoto = getFirstDisplayablePhoto(alb);
+                    const albVideo = !albPhoto ? getFirstDirectVideo(alb) : '';
+                    return (
                     <div key={alb.id} className="surface overflow-hidden">
-                      {sanitizeUrl(alb.coverImage) ? (
+                      {albPhoto ? (
                         <img
-                          src={sanitizeUrl(alb.coverImage)}
+                          src={albPhoto}
                           alt={alb.title}
                           className="aspect-[4/3] w-full object-cover bg-church-navy"
                         />
+                      ) : albVideo ? (
+                        <video
+                          preload="metadata"
+                          muted
+                          playsInline
+                          src={`${albVideo}#t=0.5`}
+                          className="aspect-[4/3] w-full object-cover bg-black"
+                        />
                       ) : (
                         <div className="flex aspect-[4/3] w-full items-center justify-center bg-church-navy">
-                          <Images className="h-9 w-9 text-white/75" aria-hidden="true" />
+                          {alb.type === 'video' ? (
+                            <Film className="h-9 w-9 text-white/75" aria-hidden="true" />
+                          ) : (
+                            <Images className="h-9 w-9 text-white/75" aria-hidden="true" />
+                          )}
                         </div>
                       )}
                       <div className="p-4 space-y-2">
@@ -2459,7 +2624,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2553,11 +2719,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         const hasNonPhoto = nextItems.some((it) => it.type !== 'photo');
                         const nextType: AlbumItem['type'] =
                           hasPhoto && hasNonPhoto ? 'mixte' : !hasPhoto && nextItems.some((it) => it.type === 'video') ? 'video' : 'photo';
+                        const validCover =
+                          prev.coverImage && !isVideoMediaUrl(prev.coverImage)
+                            ? prev.coverImage
+                            : getFirstDisplayablePhoto({ items: nextItems });
                         return {
                           ...prev,
                           type: nextType,
                           items: nextItems,
-                          coverImage: prev.coverImage || nextItems.find((it) => it.type === 'photo')?.url || nextItems[0]?.url || '',
+                          coverImage: validCover || '',
                           mediaCount: nextItems.length
                         };
                       });
@@ -2566,35 +2736,68 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   />
                 )}
 
-                <MediaBatchUploader
-                  mode="photos"
-                  helperText="Sélectionnez plusieurs photos d'un coup, glissez-déposez ou importez un dossier complet depuis votre appareil."
-                  onUploadedFiles={(res) => {
-                    const added: MediaItem[] = res.map((r, i) => ({
-                      id: `media-${Date.now()}-${i}`,
-                      type: 'photo',
-                      url: r.url,
-                      caption: r.name
-                    }));
-                    setEditingAlbum((prev) => {
-                      if (!prev) return prev;
-                      const nextItems = [...prev.items, ...added];
-                      return {
-                        ...prev,
-                        items: nextItems,
-                        coverImage: prev.coverImage || nextItems[0]?.url || '',
-                        mediaCount: nextItems.length
-                      };
-                    });
-                  }}
-                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <MediaBatchUploader
+                    mode="photos"
+                    label="Importer des photos (lot ou dossier)"
+                    helperText="Sélectionnez plusieurs photos d'un coup, glissez-déposez ou importez un dossier complet depuis votre appareil."
+                    onUploadedFiles={(res) => {
+                      const added: MediaItem[] = res.map((r, i) => ({
+                        id: `media-${Date.now()}-${i}`,
+                        type: 'photo',
+                        url: r.url,
+                        caption: r.name
+                      }));
+                      setEditingAlbum((prev) => {
+                        if (!prev) return prev;
+                        const nextItems = [...prev.items, ...added];
+                        const validCover =
+                          prev.coverImage && !isVideoMediaUrl(prev.coverImage)
+                            ? prev.coverImage
+                            : getFirstDisplayablePhoto({ items: nextItems });
+                        return {
+                          ...prev,
+                          type: prev.items.some((it) => it.type !== 'photo') ? 'mixte' : 'photo',
+                          items: nextItems,
+                          coverImage: validCover || '',
+                          mediaCount: nextItems.length
+                        };
+                      });
+                    }}
+                  />
 
-                {/* Ajouter aussi une vidéo */}
+                  <MediaBatchUploader
+                    mode="videos"
+                    label="Importer des vidéos depuis l’appareil"
+                    helperText="MP4, WebM, MOV (sélection multiple autorisée)."
+                    onUploadedFiles={(res) => {
+                      const added: MediaItem[] = res.map((r, i) => ({
+                        id: `vid-${Date.now()}-${i}`,
+                        type: 'video',
+                        url: r.url,
+                        caption: r.name
+                      }));
+                      setEditingAlbum((prev) => {
+                        if (!prev) return prev;
+                        const nextItems = [...prev.items, ...added];
+                        const hasPhoto = nextItems.some((it) => it.type === 'photo');
+                        return {
+                          ...prev,
+                          type: hasPhoto ? 'mixte' : 'video',
+                          items: nextItems,
+                          mediaCount: nextItems.length
+                        };
+                      });
+                    }}
+                  />
+                </div>
+
+                {/* Ajouter aussi une vidéo par lien YouTube / Drive */}
                 <div className="flex flex-wrap gap-2 pt-2 border-t border-church-line">
                   <input
                     value={videoItemUrl}
                     onChange={(e) => setVideoItemUrl(e.target.value)}
-                    placeholder="Lien vidéo YouTube ou MP4 à ajouter à l'album"
+                    placeholder="Lien vidéo YouTube, Google Drive ou MP4 à ajouter à l'album"
                     className="field flex-1 text-sm min-w-[220px]"
                   />
                   <input
@@ -2624,20 +2827,41 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     }}
                     className="btn-secondary text-xs"
                   >
-                    + Ajouter vidéo
+                    + Ajouter lien vidéo
                   </button>
                 </div>
 
                 {editingAlbum.items.length > 0 && (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    {editingAlbum.items.map((item, idx) => (
-                      <div key={item.id} className="rounded-xl border border-church-line p-2 space-y-1.5">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {editingAlbum.items.map((item, idx) => {
+                      const safeItemUrl = sanitizeUrl(toSafeYoutubeEmbed(item.url), false);
+                      return (
+                      <div key={item.id} className="rounded-xl border border-church-line p-2 space-y-1.5 bg-white">
                         {item.type === 'photo' ? (
                           <img src={sanitizeUrl(item.url)} alt="" className="aspect-[4/3] w-full rounded-lg object-cover" />
+                        ) : item.type === 'video' ? (
+                          isDirectVideoUrl(safeItemUrl) ? (
+                            <video
+                              controls
+                              preload="metadata"
+                              playsInline
+                              src={safeItemUrl}
+                              className="aspect-video w-full rounded-lg bg-black object-contain"
+                            />
+                          ) : (
+                            <iframe
+                              title={item.caption || 'Vidéo'}
+                              src={safeItemUrl}
+                              className="aspect-video w-full rounded-lg border-0"
+                              allowFullScreen
+                            />
+                          )
                         ) : (
-                          <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 rounded-lg bg-church-navy text-xs text-white">
-                            {item.type === 'audio' ? <Headphones className="h-5 w-5" /> : <Film className="h-5 w-5" />}
-                            <span>{item.type === 'audio' ? 'Audio' : 'Vidéo'}</span>
+                          <div className="flex flex-col justify-center gap-1.5 rounded-lg bg-church-light p-3">
+                            <span className="flex items-center gap-1.5 text-xs font-semibold text-church-navy">
+                              <Headphones className="h-4 w-4 text-church-blue shrink-0" /> Audio
+                            </span>
+                            <audio controls preload="metadata" src={sanitizeUrl(item.url, false)} className="h-8 w-full" />
                           </div>
                         )}
                         <input
@@ -2681,7 +2905,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

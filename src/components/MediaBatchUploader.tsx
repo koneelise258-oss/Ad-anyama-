@@ -4,13 +4,74 @@ import { api } from '../services/api';
 import { CulteDocument, UploadedFileResult } from '../types';
 
 interface MediaBatchUploaderProps {
-  mode: 'photos' | 'documents' | 'audio' | 'video' | 'single-image';
+  mode: 'photos' | 'documents' | 'audio' | 'video' | 'videos' | 'single-image';
   label?: string;
   helperText?: string;
   allowFolder?: boolean;
   onUploadedFiles: (results: UploadedFileResult[]) => void;
   onUploadedDocuments?: (docs: CulteDocument[]) => void;
 }
+
+const MAX_RASTER_BYTES_DIRECT = 2.2 * 1024 * 1024;
+
+const optimizeImageIfNeeded = async (file: File): Promise<File> => {
+  const isRaster =
+    /^image\/(jpeg|jpg|png|webp|heic|avif)$/i.test(file.type) ||
+    /\.(jpe?g|png|webp|heic|avif)$/i.test(file.name);
+  if (!isRaster || file.size <= MAX_RASTER_BYTES_DIRECT || typeof document === 'undefined') {
+    return file;
+  }
+
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const maxDim = 1800;
+        let width = img.naturalWidth || img.width;
+        let height = img.naturalHeight || img.height;
+        if (width > maxDim || height > maxDim) {
+          const ratio = Math.min(maxDim / width, maxDim / height);
+          width = Math.max(1, Math.round(width * ratio));
+          height = Math.max(1, Math.round(height * ratio));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          URL.revokeObjectURL(objectUrl);
+          resolve(file);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const outMime = file.type === 'image/png' && file.size < 3 * 1024 * 1024 ? 'image/png' : 'image/jpeg';
+        canvas.toBlob(
+          (blob) => {
+            URL.revokeObjectURL(objectUrl);
+            if (!blob || blob.size >= file.size) {
+              resolve(file);
+              return;
+            }
+            const base = file.name.replace(/\.[^.]+$/, '');
+            const ext = outMime === 'image/png' ? '.png' : '.jpg';
+            resolve(new File([blob], `${base}${ext}`, { type: outMime }));
+          },
+          outMime,
+          0.86
+        );
+      } catch {
+        URL.revokeObjectURL(objectUrl);
+        resolve(file);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+    img.src = objectUrl;
+  });
+};
 
 export const MediaBatchUploader: React.FC<MediaBatchUploaderProps> = ({
   mode,
@@ -35,27 +96,28 @@ export const MediaBatchUploader: React.FC<MediaBatchUploaderProps> = ({
 
   const acceptAttr =
     mode === 'photos' || mode === 'single-image'
-      ? 'image/jpeg,image/png,image/webp,image/gif,image/svg+xml'
+      ? 'image/*,.jpg,.jpeg,.png,.webp,.gif,.heic,.avif,.svg'
       : mode === 'documents'
-      ? '.pdf,.doc,.docx,.ppt,.pptx,.txt'
+      ? '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt'
       : mode === 'audio'
-      ? 'audio/*,.mp3,.m4a,.wav,.ogg'
-      : 'video/mp4,video/webm,.mp4,.webm';
+      ? 'audio/*,.mp3,.m4a,.wav,.ogg,.aac'
+      : 'video/*,.mp4,.webm,.mov,.m4v,.3gp';
 
   const filterFilesForMode = (rawFiles: File[]): File[] => {
     if (mode === 'photos' || mode === 'single-image') {
       const imgs = rawFiles.filter(
-        (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|svg)$/i.test(f.name)
+        (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|svg|heic|avif)$/i.test(f.name)
       );
       return mode === 'single-image' ? imgs.slice(0, 1) : imgs;
     }
     if (mode === 'documents') {
-      return rawFiles.filter((f) => /\.(pdf|docx?|pptx?|txt)$/i.test(f.name));
+      return rawFiles.filter((f) => /\.(pdf|docx?|pptx?|xlsx?|txt)$/i.test(f.name));
     }
     if (mode === 'audio') {
-      return rawFiles.filter((f) => f.type.startsWith('audio/') || /\.(mp3|m4a|wav|ogg)$/i.test(f.name)).slice(0, 1);
+      return rawFiles.filter((f) => f.type.startsWith('audio/') || /\.(mp3|m4a|wav|ogg|aac)$/i.test(f.name)).slice(0, 1);
     }
-    return rawFiles.filter((f) => f.type.startsWith('video/') || /\.(mp4|webm)$/i.test(f.name)).slice(0, 1);
+    const vids = rawFiles.filter((f) => f.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|3gp)$/i.test(f.name));
+    return mode === 'video' ? vids.slice(0, 1) : vids;
   };
 
   const processFiles = async (fileList: FileList | File[] | null) => {
@@ -72,7 +134,12 @@ export const MediaBatchUploader: React.FC<MediaBatchUploaderProps> = ({
     setIsUploading(true);
     setProgress({ done: 0, total: filtered.length, current: filtered[0].name });
 
-    const { uploaded, errors: uploadErrors } = await api.uploadBatch(filtered, (done, total, currentName) => {
+    const prepared =
+      mode === 'photos' || mode === 'single-image'
+        ? await Promise.all(filtered.map((f) => optimizeImageIfNeeded(f)))
+        : filtered;
+
+    const { uploaded, errors: uploadErrors } = await api.uploadBatch(prepared, (done, total, currentName) => {
       setProgress({ done, total, current: currentName });
     });
 
@@ -116,8 +183,10 @@ export const MediaBatchUploader: React.FC<MediaBatchUploaderProps> = ({
       ? 'Importer des documents (PDF, Word, PowerPoint)'
       : mode === 'audio'
       ? 'Importer un fichier audio (MP3, M4A, WAV)'
+      : mode === 'videos'
+      ? 'Importer une ou plusieurs vidéos (MP4, MOV, WebM)'
       : mode === 'video'
-      ? 'Importer une vidéo (MP4, WebM)'
+      ? 'Importer une vidéo (MP4, MOV, WebM)'
       : 'Importer une image';
 
   const folderAttrs = {
@@ -198,7 +267,7 @@ export const MediaBatchUploader: React.FC<MediaBatchUploaderProps> = ({
           ref={fileInputRef}
           type="file"
           accept={acceptAttr}
-          multiple={mode === 'photos' || mode === 'documents'}
+          multiple={mode === 'photos' || mode === 'documents' || mode === 'videos'}
           className="hidden"
           onChange={(e) => processFiles(e.target.files)}
         />
@@ -218,7 +287,7 @@ export const MediaBatchUploader: React.FC<MediaBatchUploaderProps> = ({
       {lastSuccessCount > 0 && (
         <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          {lastSuccessCount} fichier{lastSuccessCount > 1 ? 's' : ''} envoyé{lastSuccessCount > 1 ? 's' : ''} sur le serveur avec succès.
+          {lastSuccessCount} fichier{lastSuccessCount > 1 ? 's' : ''} importé{lastSuccessCount > 1 ? 's' : ''} avec succès.
         </p>
       )}
 

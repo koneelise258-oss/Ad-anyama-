@@ -22,6 +22,7 @@ export const MediaViewerSection: React.FC<MediaViewerSectionProps> = ({
   contextTitle = 'media'
 }) => {
   const [activeVideoIds, setActiveVideoIds] = useState<Record<string, boolean>>({});
+  const [fallbackVideoIds, setFallbackVideoIds] = useState<Record<string, boolean>>({});
   const [activeAudioIds, setActiveAudioIds] = useState<Record<string, boolean>>({});
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const [previewDoc, setPreviewDoc] = useState<CulteDocument | null>(null);
@@ -30,7 +31,11 @@ export const MediaViewerSection: React.FC<MediaViewerSectionProps> = ({
   const safePrimaryAudio = audioUrl ? sanitizeUrl(audioUrl, false) : '';
 
   const validMedia = mediaItems
-    .map((m) => ({ ...m, url: sanitizeUrl(m.type === 'video' ? toSafeYoutubeEmbed(m.url) : m.url) }))
+    .map((m) => ({
+      ...m,
+      url: sanitizeUrl(m.type === 'video' ? toSafeYoutubeEmbed(m.url) : m.url),
+      fallbackUrl: m.fallbackUrl ? sanitizeUrl(m.fallbackUrl, false) : undefined
+    }))
     .filter((m) => Boolean(m.url));
 
   const photos = validMedia.filter((m) => m.type === 'photo');
@@ -62,8 +67,10 @@ export const MediaViewerSection: React.FC<MediaViewerSectionProps> = ({
           {videos.length > 0 && (
             <div className="space-y-4">
               {videos.map((vid, idx) => {
-                const isShowing = Boolean(activeVideoIds[vid.id] ?? idx === 0);
-                const direct = isDirectVideoUrl(vid.url);
+                const isShowing = Boolean(activeVideoIds[vid.id] ?? true);
+                const useFallbackEmbed = Boolean(fallbackVideoIds[vid.id] && vid.fallbackUrl);
+                const activeUrl = useFallbackEmbed && vid.fallbackUrl ? vid.fallbackUrl : vid.url;
+                const direct = !useFallbackEmbed && isDirectVideoUrl(activeUrl);
                 const dlUrl = buildDownloadUrl(vid.url, vid.caption || `${contextTitle}-video-${idx + 1}`);
                 return (
                   <div key={vid.id} className="surface overflow-hidden">
@@ -91,7 +98,7 @@ export const MediaViewerSection: React.FC<MediaViewerSectionProps> = ({
                           </a>
                         ) : (
                           <a
-                            href={vid.url}
+                            href={activeUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="btn-secondary min-h-[38px] px-3 text-xs"
@@ -105,11 +112,22 @@ export const MediaViewerSection: React.FC<MediaViewerSectionProps> = ({
                     {isShowing && (
                       <div className="bg-black">
                         {direct ? (
-                          <video controls preload="metadata" src={vid.url} className="aspect-video w-full object-contain" />
+                          <video
+                            controls
+                            playsInline
+                            preload="metadata"
+                            src={activeUrl}
+                            onError={() => {
+                              if (vid.fallbackUrl) {
+                                setFallbackVideoIds((prev) => ({ ...prev, [vid.id]: true }));
+                              }
+                            }}
+                            className="aspect-video w-full object-contain"
+                          />
                         ) : (
                           <iframe
                             title={vid.caption || 'Vidéo'}
-                            src={vid.url}
+                            src={activeUrl}
                             className="aspect-video w-full border-0"
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                             allowFullScreen

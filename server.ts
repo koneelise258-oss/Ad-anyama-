@@ -2,6 +2,7 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -10,16 +11,34 @@ import type webPushType from 'web-push';
 
 const require = createRequire(import.meta.url);
 const webpush = require('web-push') as typeof webPushType;
+let bundledFirebaseConfig: { projectId?: string; apiKey?: string } = {};
+try {
+  bundledFirebaseConfig = require('./firebase-applet-config.json');
+} catch {
+  bundledFirebaseConfig = {};
+}
 
 dotenv.config();
 
 const PORT = 3000;
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const IS_VERCEL = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+const BUNDLED_DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = IS_VERCEL ? path.join(os.tmpdir(), 'eeadci-data') : BUNDLED_DATA_DIR;
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
 const SECRET_FILE = path.join(DATA_DIR, '.session_secret');
 
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+if (IS_VERCEL) {
+  const bundledStoreFile = path.join(BUNDLED_DATA_DIR, 'store.json');
+  try {
+    if (!fs.existsSync(STORE_FILE) && fs.existsSync(bundledStoreFile)) {
+      fs.copyFileSync(bundledStoreFile, STORE_FILE);
+    }
+  } catch {
+    // ignore seed copy failure on ephemeral fs
+  }
+}
 
 // --- Types internes serveur ---
 interface StoredAdmin {
@@ -410,17 +429,51 @@ const createDefaultStore = (): StoreData => ({
     sessionTimeoutMinutes: 120
   },
   securityLogs: [],
-  vapidKeys: webpush.generateVAPIDKeys(),
+  vapidKeys: createInitialVapidKeys(),
   pushSubscriptions: [],
   pushHistory: [],
   driveAccounts: [],
   driveFolders: []
 });
 
+const deriveVapidKeys = (): { publicKey: string; privateKey: string } => {
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    return {
+      publicKey: process.env.VAPID_PUBLIC_KEY.trim(),
+      privateKey: process.env.VAPID_PRIVATE_KEY.trim()
+    };
+  }
+  if (IS_VERCEL) {
+    const seed = crypto
+      .createHash('sha256')
+      .update(`${bundledFirebaseConfig?.projectId || 'eeadci'}:${bundledFirebaseConfig?.apiKey || 'anyama'}:vapid-v1`)
+      .digest();
+    seed[0] = (seed[0] & 0x7f) || 1;
+    const ecdh = crypto.createECDH('prime256v1');
+    ecdh.setPrivateKey(seed);
+    return {
+      publicKey: ecdh.getPublicKey(undefined, 'uncompressed').toString('base64url'),
+      privateKey: ecdh.getPrivateKey().toString('base64url')
+    };
+  }
+  return webpush.generateVAPIDKeys();
+};
+
+const createInitialVapidKeys = () => deriveVapidKeys();
+
 // --- Secret HMAC Key ---
 const getSessionSecret = (): string => {
   if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32) {
     return process.env.SESSION_SECRET;
+  }
+  if (IS_VERCEL) {
+    return crypto
+      .createHmac(
+        'sha256',
+        `${bundledFirebaseConfig?.projectId || 'eeadci'}:${bundledFirebaseConfig?.apiKey || 'anyama'}:session-v1`
+      )
+      .update('eeadci-session-secret')
+      .digest('hex');
   }
   try {
     if (fs.existsSync(SECRET_FILE)) {
@@ -586,15 +639,25 @@ const loadStore = (): StoreData => {
 };
 
 const saveStore = (data: StoreData): void => {
-  const tmpFile = `${STORE_FILE}.${process.pid}.tmp`;
-  fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tmpFile, STORE_FILE);
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmpFile = `${STORE_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tmpFile, STORE_FILE);
+  } catch (err) {
+    console.error('Erreur sauvegarde store.json:', err);
+  }
 };
 
 let store: StoreData = loadStore();
 
-if (!store.vapidKeys?.publicKey || !store.vapidKeys?.privateKey) {
-  store.vapidKeys = webpush.generateVAPIDKeys();
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  store.vapidKeys = {
+    publicKey: process.env.VAPID_PUBLIC_KEY.trim(),
+    privateKey: process.env.VAPID_PRIVATE_KEY.trim()
+  };
+} else if (IS_VERCEL || !store.vapidKeys?.publicKey || !store.vapidKeys?.privateKey) {
+  store.vapidKeys = deriveVapidKeys();
   saveStore(store);
 }
 
@@ -767,6 +830,12 @@ const isValidEmail = (email: string): boolean => {
 };
 
 const getFirebaseApiKey = (): string => {
+  if (process.env.FIREBASE_API_KEY && process.env.FIREBASE_API_KEY.trim()) {
+    return process.env.FIREBASE_API_KEY.trim();
+  }
+  if (bundledFirebaseConfig?.apiKey) {
+    return bundledFirebaseConfig.apiKey;
+  }
   try {
     const cfgPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
     if (fs.existsSync(cfgPath)) {
@@ -1656,6 +1725,8 @@ const ALLOWED_MIME_MAP: Record<string, { ext: string[]; docType: 'pdf' | 'notes'
   'image/webp': { ext: ['.webp'], docType: 'image' },
   'image/gif': { ext: ['.gif'], docType: 'image' },
   'image/svg+xml': { ext: ['.svg'], docType: 'image' },
+  'image/heic': { ext: ['.heic'], docType: 'image' },
+  'image/avif': { ext: ['.avif'], docType: 'image' },
   'application/pdf': { ext: ['.pdf'], docType: 'pdf' },
   'application/msword': { ext: ['.doc'], docType: 'notes' },
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { ext: ['.docx'], docType: 'notes' },
@@ -1674,7 +1745,8 @@ const ALLOWED_MIME_MAP: Record<string, { ext: string[]; docType: 'pdf' | 'notes'
   'video/mp4': { ext: ['.mp4'], docType: 'video' },
   'video/webm': { ext: ['.webm'], docType: 'video' },
   'video/quicktime': { ext: ['.mov'], docType: 'video' },
-  'video/x-m4v': { ext: ['.m4v'], docType: 'video' }
+  'video/x-m4v': { ext: ['.m4v'], docType: 'video' },
+  'video/3gpp': { ext: ['.3gp'], docType: 'video' }
 };
 
 const EXT_TO_META: Record<string, { docType: 'pdf' | 'notes' | 'diapo' | 'image' | 'audio' | 'video'; mime: string }> = {
@@ -1684,6 +1756,8 @@ const EXT_TO_META: Record<string, { docType: 'pdf' | 'notes' | 'diapo' | 'image'
   '.webp': { docType: 'image', mime: 'image/webp' },
   '.gif': { docType: 'image', mime: 'image/gif' },
   '.svg': { docType: 'image', mime: 'image/svg+xml' },
+  '.heic': { docType: 'image', mime: 'image/heic' },
+  '.avif': { docType: 'image', mime: 'image/avif' },
   '.pdf': { docType: 'pdf', mime: 'application/pdf' },
   '.doc': { docType: 'notes', mime: 'application/msword' },
   '.docx': { docType: 'notes', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
@@ -1700,7 +1774,8 @@ const EXT_TO_META: Record<string, { docType: 'pdf' | 'notes' | 'diapo' | 'image'
   '.mp4': { docType: 'video', mime: 'video/mp4' },
   '.webm': { docType: 'video', mime: 'video/webm' },
   '.mov': { docType: 'video', mime: 'video/quicktime' },
-  '.m4v': { docType: 'video', mime: 'video/x-m4v' }
+  '.m4v': { docType: 'video', mime: 'video/x-m4v' },
+  '.3gp': { docType: 'video', mime: 'video/3gpp' }
 };
 
 const formatSize = (bytes: number): string => {
@@ -1754,13 +1829,21 @@ app.post(
       return;
     }
 
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
     const safeFileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${finalExt}`;
     fs.writeFileSync(path.join(UPLOADS_DIR, safeFileName), finalBuffer);
+
+    // Sur Vercel (/tmp éphémère), encoder directement les images raster <= 1,8 Mo en data URL pour garantir l'affichage permanent
+    const inlineRasterMime = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(finalMime);
+    const resolvedUrl =
+      IS_VERCEL && docType === 'image' && inlineRasterMime && finalBuffer.length <= 1.8 * 1024 * 1024
+        ? `data:${finalMime};base64,${finalBuffer.toString('base64')}`
+        : `/uploads/${safeFileName}`;
 
     const displayName = sanitizeText(path.basename(rawName, path.extname(rawName)), 120) || 'Fichier';
 
     res.json({
-      url: `/uploads/${safeFileName}`,
+      url: resolvedUrl,
       name: displayName,
       size: finalBuffer.length,
       formattedSize: formatSize(finalBuffer.length),
@@ -2015,7 +2098,7 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
   const albumCategory = sanitizeText(req.body?.albumCategory, 80) || 'Événements';
   const importKind = sanitizeText(req.body?.importKind, 20) || 'all'; // 'all' | 'media' | 'document'
 
-  let filesToImport: Array<{ id: string; name: string; mimeType?: string }> = Array.isArray(req.body?.files)
+  let filesToImport: Array<{ id: string; name: string; mimeType?: string; thumbnailLink?: string }> = Array.isArray(req.body?.files)
     ? req.body.files
     : [];
 
@@ -2054,19 +2137,28 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
       return { kind: 'document', ext: '.pdf', docType: 'pdf', isWorkspaceExport: true, finalMime: 'application/pdf' };
     }
 
-    if (mime.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(rawExt)) {
+    if (mime.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.avif'].includes(rawExt)) {
       let ext = '.jpg';
-      if (mime.includes('png') || rawExt === '.png') ext = '.png';
-      else if (mime.includes('webp') || rawExt === '.webp') ext = '.webp';
-      else if (mime.includes('gif') || rawExt === '.gif') ext = '.gif';
-      return { kind: 'photo', ext, finalMime: mime || 'image/jpeg' };
+      let finalMime = mime || 'image/jpeg';
+      if (mime.includes('png') || rawExt === '.png') {
+        ext = '.png';
+        finalMime = 'image/png';
+      } else if (mime.includes('webp') || rawExt === '.webp') {
+        ext = '.webp';
+        finalMime = 'image/webp';
+      } else if (mime.includes('gif') || rawExt === '.gif') {
+        ext = '.gif';
+        finalMime = 'image/gif';
+      }
+      return { kind: 'photo', ext, finalMime };
     }
 
-    if (mime.startsWith('video/') || ['.mp4', '.webm', '.mov', '.m4v'].includes(rawExt)) {
+    if (mime.startsWith('video/') || ['.mp4', '.webm', '.mov', '.m4v', '.3gp'].includes(rawExt)) {
       let ext = '.mp4';
       if (mime.includes('webm') || rawExt === '.webm') ext = '.webm';
       else if (mime.includes('quicktime') || rawExt === '.mov') ext = '.mov';
       else if (rawExt === '.m4v') ext = '.m4v';
+      else if (rawExt === '.3gp') ext = '.3gp';
       return { kind: 'video', ext, finalMime: mime || 'video/mp4' };
     }
 
@@ -2107,7 +2199,7 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
   try {
     const listDriveChildren = async (parentId: string) => {
       const q = `'${parentId.replace(/'/g, '')}' in parents and trashed = false`;
-      const listUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,shortcutDetails)&pageSize=100&includeItemsFromAllDrives=true&supportsAllDrives=true`;
+      const listUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,thumbnailLink,shortcutDetails)&pageSize=100&includeItemsFromAllDrives=true&supportsAllDrives=true`;
       const listRes = await fetch(listUrl, {
         headers: { Authorization: `Bearer ${driveToken}` }
       });
@@ -2165,6 +2257,7 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
       id: string;
       type: 'photo' | 'video' | 'audio';
       url: string;
+      fallbackUrl?: string;
       caption: string;
       mimeType: string;
       fileSize: string;
@@ -2188,6 +2281,8 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
     let firstErrorStatus = 0;
     let firstErrorMessage = '';
 
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
     for (const df of filesToImport.slice(0, 80)) {
       if (!df?.id) continue;
       const cls = classifyDriveEntry(df.mimeType || '', df.name || '');
@@ -2197,6 +2292,9 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
         skippedCount += 1;
         continue;
       }
+
+      const cleanTitle = sanitizeText(path.basename(df.name || 'Fichier Drive', path.extname(df.name || '')), 120) || 'Fichier';
+      const drivePreviewUrl = `https://drive.google.com/file/d/${encodeURIComponent(df.id)}/preview`;
 
       const fetchUrl = cls.isWorkspaceExport
         ? `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(df.id)}/export?mimeType=application/pdf`
@@ -2227,7 +2325,28 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
 
       const arrBuf = await mediaRes.arrayBuffer();
       const buf = Buffer.from(arrBuf);
-      if (buf.length === 0 || buf.length > 150 * 1024 * 1024) {
+      if (buf.length === 0) {
+        failedCount += 1;
+        continue;
+      }
+
+      // Sur Vercel, si une vidéo Drive dépasse 45 Mo, basculer vers le lecteur Drive intégré
+      if (IS_VERCEL && cls.kind === 'video' && buf.length > 45 * 1024 * 1024) {
+        importedMedia.push({
+          id: `media-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
+          type: 'video',
+          url: drivePreviewUrl,
+          fallbackUrl: drivePreviewUrl,
+          caption: cleanTitle,
+          mimeType: cls.finalMime,
+          fileSize: formatSize(buf.length),
+          driveFileId: df.id,
+          driveAccountEmail: accountEmail
+        });
+        continue;
+      }
+
+      if (buf.length > 150 * 1024 * 1024) {
         failedCount += 1;
         continue;
       }
@@ -2235,7 +2354,31 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
       const safeFileName = `drive-${Date.now()}-${crypto.randomBytes(5).toString('hex')}${cls.ext}`;
       fs.writeFileSync(path.join(UPLOADS_DIR, safeFileName), buf);
 
-      const cleanTitle = sanitizeText(path.basename(df.name || 'Fichier Drive', path.extname(df.name || '')), 120) || 'Fichier';
+      let resolvedMediaUrl = `/uploads/${safeFileName}`;
+
+      // Sur Vercel (/tmp éphémère), garantir un affichage permanent des photos importées
+      if (IS_VERCEL && cls.kind === 'photo') {
+        const inlineAllowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(cls.finalMime);
+        if (inlineAllowed && buf.length <= 1.8 * 1024 * 1024) {
+          resolvedMediaUrl = `data:${cls.finalMime};base64,${buf.toString('base64')}`;
+        } else if (df.thumbnailLink && /^https:\/\//i.test(df.thumbnailLink)) {
+          try {
+            const hiResThumb = df.thumbnailLink.replace(/=s\d+.*$/, '=s1600');
+            const thumbRes = await fetch(hiResThumb, {
+              headers: { Authorization: `Bearer ${driveToken}` }
+            });
+            if (thumbRes.ok) {
+              const tBuf = Buffer.from(await thumbRes.arrayBuffer());
+              if (tBuf.length > 0 && tBuf.length <= 1.8 * 1024 * 1024) {
+                resolvedMediaUrl = `data:image/jpeg;base64,${tBuf.toString('base64')}`;
+              }
+            }
+          } catch {
+            // conserver /uploads/... en dernier recours
+          }
+        }
+      }
+
       const formattedSize = formatSize(buf.length);
 
       if (cls.kind === 'document') {
@@ -2244,7 +2387,7 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
           title: cleanTitle,
           fileSize: formattedSize,
           type: cls.docType || 'pdf',
-          downloadUrl: `/uploads/${safeFileName}`,
+          downloadUrl: resolvedMediaUrl,
           mimeType: cls.finalMime,
           driveFileId: df.id,
           driveAccountEmail: accountEmail
@@ -2253,7 +2396,8 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
         importedMedia.push({
           id: `media-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
           type: cls.kind,
-          url: `/uploads/${safeFileName}`,
+          url: resolvedMediaUrl,
+          ...(cls.kind === 'video' ? { fallbackUrl: drivePreviewUrl } : {}),
           caption: cleanTitle,
           mimeType: cls.finalMime,
           fileSize: formattedSize,
@@ -2597,10 +2741,12 @@ app.get('/api/admin/backup', requireAdmin, (req: AuthedRequest, res: Response) =
   });
 });
 
-// Planificateur automatique toutes les 60 secondes
-setInterval(() => {
-  runAutomations();
-}, 60_000);
+// Planificateur automatique toutes les 60 secondes (serveur persistant hors Vercel)
+if (!IS_VERCEL) {
+  setInterval(() => {
+    runAutomations();
+  }, 60_000);
+}
 
 // --- Montage Vite (Dev) ou Dist (Prod) ---
 async function startServer() {
@@ -2629,7 +2775,13 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Erreur critique au démarrage du serveur:', err);
-  process.exit(1);
-});
+if (!IS_VERCEL) {
+  startServer().catch((err) => {
+    console.error('Erreur critique au démarrage du serveur:', err);
+    process.exit(1);
+  });
+}
+
+export { app };
+export default app;
+
