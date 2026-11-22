@@ -1,25 +1,54 @@
 import React, { useState } from 'react';
-import { Lock, ArrowLeft, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Lock, ArrowLeft, AlertCircle, ShieldCheck, ExternalLink, LogIn } from 'lucide-react';
 import { api, setSessionToken } from '../services/api';
-import { signInGoogleForIdentity } from '../services/googleDrive';
+import {
+  isInsideIframe,
+  isStandalonePwa,
+  shouldUseRedirectFallback,
+  signInGoogleForIdentity,
+  startGoogleIdentityRedirect
+} from '../services/googleDrive';
 import { AdminUserPublic, AuthStatus } from '../types';
 
 interface AdminAuthGateProps {
   authStatus: AuthStatus;
+  initialError?: string;
   onAuthenticated: (admin: AdminUserPublic) => void;
   onCancel: () => void;
 }
 
 export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
+  initialError = '',
   onAuthenticated,
   onCancel
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError);
+
+  const inIframe = isInsideIframe();
+  const inStandalonePwa = isStandalonePwa();
+
+  const handleDirectRedirect = async () => {
+    setError('');
+    setIsSubmitting(true);
+    try {
+      await startGoogleIdentityRedirect();
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setError(err instanceof Error ? err.message : 'Impossible de lancer la redirection Google.');
+    }
+  };
 
   const handleContinueWithGoogle = async () => {
     setError('');
     setIsSubmitting(true);
+
+    // En application épinglée / installée (PWA standalone), la redirection directe évite la perte de session popup
+    if (inStandalonePwa && !inIframe) {
+      await handleDirectRedirect();
+      return;
+    }
+
     try {
       const googleAuth = await signInGoogleForIdentity();
       const res = await api.loginWithGoogle(googleAuth.idToken);
@@ -28,9 +57,26 @@ export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
     } catch (err: any) {
       const code = String(err?.code || '');
       const rawMsg = err instanceof Error ? err.message : '';
-      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+
+      if (shouldUseRedirectFallback(err) && !inIframe) {
+        await handleDirectRedirect();
+        return;
+      }
+
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
         setError(
-          'Connexion Google interrompue ou bloquée. Vérifiez que votre adresse Gmail est ajoutée dans Google Cloud Console → Utilisateurs tests (projet gen-lang-client-0797796121).'
+          `Domaine non autorisé pour la connexion Google (${host}). Ajoutez « ${host} » dans Firebase Authentication → Paramètres → Domaines autorisés.`
+        );
+      } else if (
+        code === 'auth/popup-blocked' ||
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/cancelled-popup-request'
+      ) {
+        setError(
+          inIframe
+            ? 'La fenêtre Google a été bloquée ou fermée dans l’aperçu intégré. Ouvrez le site dans un nouvel onglet pour vous connecter sans blocage, et vérifiez que votre Gmail est bien dans Google Cloud Console → Utilisateurs tests.'
+            : 'Connexion Google interrompue ou bloquée par le navigateur. Essayez la connexion directe ci-dessous.'
         );
       } else {
         setError(rawMsg || 'Accès refusé. Utilisez un compte Google autorisé.');
@@ -39,6 +85,9 @@ export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  const openInNewTabUrl =
+    typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}#/portail-eeadci` : '#';
 
   return (
     <div className="page flex min-h-[75vh] items-center justify-center py-10">
@@ -64,14 +113,25 @@ export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs sm:text-sm text-red-800">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <p>{error}</p>
+              {inIframe && (
+                <a
+                  href={openInNewTabUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 font-semibold text-church-navy underline"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Ouvrir dans un nouvel onglet pour se connecter
+                </a>
+              )}
               {/Utilisateurs tests|access_denied|validation|blocked/i.test(error) && (
                 <a
                   href="https://console.cloud.google.com/auth/audience?project=gen-lang-client-0797796121"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block font-semibold underline"
+                  className="block font-semibold underline"
                 >
                   Ouvrir Google Cloud Console → Utilisateurs tests
                 </a>
@@ -107,6 +167,30 @@ export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
             </svg>
             <span>{isSubmitting ? 'Vérification Google…' : 'Continuer avec Google'}</span>
           </button>
+
+          {!inIframe && !inStandalonePwa && (
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleDirectRedirect}
+              className="btn-ghost w-full text-xs text-church-blue"
+            >
+              <LogIn className="h-3.5 w-3.5" />
+              Connexion directe sans fenêtre popup
+            </button>
+          )}
+
+          {inIframe && (
+            <a
+              href={openInNewTabUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-xl border border-church-line bg-church-light/60 px-3 text-xs font-medium text-church-navy hover:bg-church-tint"
+            >
+              <ExternalLink className="h-3.5 w-3.5 text-church-blue" />
+              Ouvrir dans un nouvel onglet (si la fenêtre Google bloque)
+            </a>
+          )}
 
           <p className="flex items-center justify-center gap-1.5 text-center text-xs text-church-muted">
             <ShieldCheck className="h-3.5 w-3.5 text-church-blue" aria-hidden="true" />

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { EventItem } from '../types';
-import { HERO_IMAGE } from '../mockData';
 import { sanitizeUrl } from '../utils/security';
 import { Clock, MapPin, User, CalendarPlus, Check, ThumbsUp, MessageCircle, BarChart3, CheckCircle2, Image as ImageIcon } from 'lucide-react';
 import { BackBar, BlockTitle, DateBlock, Lightbox, useToast } from './ui';
@@ -111,7 +110,7 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
   const poll = event.poll;
   const totalVotes = poll ? Math.max(poll.totalVotes || 0, poll.options.reduce((acc, curr) => acc + curr.votes, 0)) : 0;
   const commentsList = event.comments || [];
-  const safePoster = sanitizeUrl(event.coverImage) || HERO_IMAGE;
+  const safePoster = sanitizeUrl(event.coverImage);
 
   return (
     <div>
@@ -133,21 +132,23 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
         </div>
 
         {/* Affiche Officielle */}
-        <div className="relative group overflow-hidden rounded-2xl border border-church-line bg-church-navy">
-          <img
-            src={safePoster}
-            alt={`Affiche de l'événement ${event.title}`}
-            className="w-full aspect-[16/9] object-cover transition-transform duration-300 group-hover:scale-[1.02] cursor-pointer"
-            onClick={() => setIsPosterZoomed(true)}
-          />
-          <button
-            onClick={() => setIsPosterZoomed(true)}
-            className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-xl bg-white/95 hover:bg-white text-church-navy text-xs font-semibold px-3.5 py-2 shadow-sm transition-all"
-          >
-            <ImageIcon className="w-3.5 h-3.5 text-church-blue" />
-            Agrandir l’affiche
-          </button>
-        </div>
+        {safePoster && (
+          <div className="relative group overflow-hidden rounded-2xl border border-church-line bg-church-navy">
+            <img
+              src={safePoster}
+              alt={`Affiche de l'événement ${event.title}`}
+              className="w-full aspect-[16/9] object-cover transition-transform duration-300 group-hover:scale-[1.02] cursor-pointer"
+              onClick={() => setIsPosterZoomed(true)}
+            />
+            <button
+              onClick={() => setIsPosterZoomed(true)}
+              className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-xl bg-white/95 hover:bg-white text-church-navy text-xs font-semibold px-3.5 py-2 shadow-sm transition-all"
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-church-blue" />
+              Agrandir l’affiche
+            </button>
+          </div>
+        )}
 
         {/* Informations pratiques */}
         <dl className="surface divide-y divide-church-line overflow-hidden">

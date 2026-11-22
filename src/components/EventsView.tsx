@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { EventItem } from '../types';
-import { HERO_IMAGE } from '../mockData';
 import { sanitizeUrl } from '../utils/security';
-import { Clock, MapPin, Check } from 'lucide-react';
+import { Clock, MapPin, Check, CalendarDays } from 'lucide-react';
 import { PageIntro, DateBlock, EmptyState } from './ui';
 
 interface EventsViewProps {
@@ -55,11 +54,18 @@ export const EventsView: React.FC<EventsViewProps> = ({ events, onSelectEvent, o
                     className="group relative block bg-church-navy overflow-hidden"
                     aria-label={ev.title}
                   >
-                    <img
-                      src={sanitizeUrl(ev.coverImage) || HERO_IMAGE}
-                      alt={`Affiche ${ev.title}`}
-                      className="aspect-[16/9] h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 md:aspect-auto"
-                    />
+                    {sanitizeUrl(ev.coverImage) ? (
+                      <img
+                        src={sanitizeUrl(ev.coverImage)}
+                        alt={`Affiche ${ev.title}`}
+                        className="aspect-[16/9] h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 md:aspect-auto"
+                      />
+                    ) : (
+                      <span className="flex aspect-[16/9] h-full min-h-[150px] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-church-navy to-church-blue/90 p-5 text-white md:aspect-auto">
+                        <CalendarDays className="h-8 w-8 text-white/80" aria-hidden="true" />
+                        <span className="text-xs font-medium uppercase tracking-wider text-white/80">{ev.category}</span>
+                      </span>
+                    )}
                   </button>
 
                   <div className="flex gap-4 p-5 sm:p-6">

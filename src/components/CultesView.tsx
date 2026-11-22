@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { Culte, CulteServiceType } from '../types';
-import { HERO_IMAGE } from '../mockData';
 import { buildDownloadUrl, isDirectVideoUrl, sanitizeUrl } from '../utils/security';
 import {
   CULTE_TYPE_LABELS,
@@ -8,7 +7,7 @@ import {
   inferCulteServiceType,
   sortCultesByDateDesc
 } from '../utils/cultes';
-import { Search, Play, Share2, MessageCircle, Headphones, FileText, Download } from 'lucide-react';
+import { Search, Play, Share2, MessageCircle, Headphones, FileText, Download, BookOpen } from 'lucide-react';
 import { PageIntro, Meta, EmptyState, formatDate } from './ui';
 
 interface CultesViewProps {
@@ -93,11 +92,20 @@ export const CultesView: React.FC<CultesViewProps> = ({ cultes, onSelectCulte, o
                 className="group relative block h-full w-full"
                 aria-label={culte.hasVideo && safeVideo ? `Lire la vidéo : ${culte.title}` : culte.title}
               >
-                <img
-                  src={sanitizeUrl(culte.coverImage) || HERO_IMAGE}
-                  alt={culte.title}
-                  className="aspect-video h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] sm:aspect-auto"
-                />
+                {sanitizeUrl(culte.coverImage) ? (
+                  <img
+                    src={sanitizeUrl(culte.coverImage)}
+                    alt={culte.title}
+                    className="aspect-video h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] sm:aspect-auto"
+                  />
+                ) : (
+                  <span className="flex aspect-video h-full min-h-[170px] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-church-navy to-church-blue/90 p-5 text-center text-white sm:aspect-auto">
+                    <BookOpen className="h-8 w-8 text-white/75" aria-hidden="true" />
+                    {culte.scriptureRef && (
+                      <span className="font-serif text-sm text-white/90 line-clamp-2">{culte.scriptureRef}</span>
+                    )}
+                  </span>
+                )}
                 {culte.hasVideo && safeVideo && (
                   <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25 transition-colors group-hover:bg-church-navy/35">
                     <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-church-navy shadow-md">

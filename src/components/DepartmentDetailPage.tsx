@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { DepartmentItem } from '../types';
-import { HERO_IMAGE } from '../mockData';
 import { buildDownloadUrl, sanitizeUrl } from '../utils/security';
 import { Phone, Mail, Clock, MapPin, User, Download } from 'lucide-react';
 import { BackBar, BlockTitle, Lightbox } from './ui';
@@ -44,11 +43,13 @@ export const DepartmentDetailPage: React.FC<DepartmentDetailPageProps> = ({ depa
           </div>
         </div>
 
-        <img
-          src={sanitizeUrl(department.coverImage) || HERO_IMAGE}
-          alt={department.name}
-          className="mt-6 aspect-[16/9] w-full rounded-2xl object-cover bg-church-navy"
-        />
+        {sanitizeUrl(department.coverImage) && (
+          <img
+            src={sanitizeUrl(department.coverImage)}
+            alt={department.name}
+            className="mt-6 aspect-[16/9] w-full rounded-2xl object-cover bg-church-navy"
+          />
+        )}
 
         {infos.length > 0 && (
           <dl className="surface mt-6 divide-y divide-church-line overflow-hidden">

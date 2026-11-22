@@ -1,11 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { AlbumItem, CulteDocument, LinkedDriveAccount, LinkedDriveFolder, MediaItem } from '../types';
 import {
+  clearDriveSession,
   connectGoogleDriveAccount,
   getCachedDriveSessions,
   getDriveSessionToken,
+  isInsideIframe,
+  isStandalonePwa,
   listDriveFolders,
   listDriveFilesInFolder,
+  shouldUseRedirectFallback,
+  startGoogleDriveRedirect,
   type DriveAccountSession,
   type DriveFileKind,
   type DriveFolderItem,
@@ -18,6 +23,8 @@ import {
   FolderOpen,
   RefreshCw,
   Check,
+  CheckSquare,
+  Square,
   Image as ImageIcon,
   Film,
   Headphones,
@@ -28,7 +35,10 @@ import {
   Trash2,
   CloudUpload,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Share2,
+  Sparkles,
+  ExternalLink
 } from 'lucide-react';
 
 interface GoogleDriveBrowserProps {
@@ -91,6 +101,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
   const [connecting, setConnecting] = useState(false);
   const [loadingDrive, setLoadingDrive] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [removingEmail, setRemovingEmail] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [confirmUnlinkEmail, setConfirmUnlinkEmail] = useState<string | null>(null);
 
@@ -106,6 +117,8 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
 
   const currentFolder = breadcrumbs[breadcrumbs.length - 1] || { id: 'root', name: 'Mon Drive' };
   const activeToken = activeEmail ? getDriveSessionToken(activeEmail) : null;
+  const inIframe = isInsideIframe();
+  const inStandalonePwa = isStandalonePwa();
 
   const refreshSessions = () => {
     setSessions(getCachedDriveSessions());
@@ -136,8 +149,25 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
     } else {
       setFolders([]);
       setFiles([]);
+      setSelectedFolderIds([]);
+      setSelectedFileIds([]);
     }
   }, [activeEmail, activeToken, currentFolder.id]);
+
+  // Synchroniser activeEmail si la liste des comptes change après suppression
+  useEffect(() => {
+    const allEmails = new Set([
+      ...linkedAccounts.map((a) => a.email.toLowerCase()),
+      ...sessions.map((s) => s.email.toLowerCase())
+    ]);
+    if (activeEmail && !allEmails.has(activeEmail.toLowerCase())) {
+      const first = linkedAccounts[0]?.email || sessions[0]?.email || '';
+      setActiveEmail(first);
+    } else if (!activeEmail && allEmails.size > 0) {
+      const first = sessions[0]?.email || linkedAccounts[0]?.email || '';
+      if (first) setActiveEmail(first);
+    }
+  }, [linkedAccounts, sessions, activeEmail]);
 
   const mediaFiles = useMemo(() => files.filter((f) => f.kind !== 'document'), [files]);
   const documentFiles = useMemo(() => files.filter((f) => f.kind === 'document'), [files]);
@@ -150,6 +180,18 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
   const handleConnectAccount = async (loginHint?: string) => {
     setConnecting(true);
     setStatusError(null);
+
+    if (inStandalonePwa && !inIframe) {
+      try {
+        await startGoogleDriveRedirect(loginHint);
+        return;
+      } catch (err) {
+        setConnecting(false);
+        setStatusError(err instanceof Error ? err.message : 'Impossible de lancer la redirection Google Drive.');
+        return;
+      }
+    }
+
     try {
       const session = await connectGoogleDriveAccount(loginHint);
       refreshSessions();
@@ -164,12 +206,25 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
       onSyncDriveState({ driveAccounts: saved.driveAccounts });
       onNotify?.(`Compte Google Drive relié : ${session.email}`);
     } catch (err: any) {
+      if (shouldUseRedirectFallback(err) && !inIframe) {
+        try {
+          await startGoogleDriveRedirect(loginHint);
+          return;
+        } catch {
+          // continue to error handling below
+        }
+      }
+
       const rawMsg = String(err?.message || '');
       const code = String(err?.code || '');
       let message = 'Connexion Google Drive annulée ou impossible.';
-      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-        message =
-          'Connexion interrompue ou bloquée par Google : si vous voyez « n’a pas terminé la procédure de validation de Google », ajoutez votre adresse Gmail dans Google Cloud Console → Écran de consentement OAuth → Utilisateurs tests (projet gen-lang-client-0797796121).';
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        message = `Domaine non autorisé dans Firebase Auth (${host}).`;
+      } else if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        message = inIframe
+          ? 'Fenêtre Google bloquée dans l’aperçu intégré : ouvrez l’application dans un nouvel onglet pour relier Google Drive, puis cochez bien la case d’autorisation Google Drive.'
+          : 'Connexion interrompue ou bloquée : ajoutez votre Gmail dans Google Cloud Console → Utilisateurs tests (gen-lang-client-0797796121) et cochez la case d’accès Google Drive.';
       } else if (/access_denied|validation|verified|blocked/i.test(rawMsg)) {
         message =
           'Accès refusé par Google (application en mode Test) : ajoutez ce compte Gmail dans les « Utilisateurs tests » de Google Cloud Console (gen-lang-client-0797796121).';
@@ -184,17 +239,27 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
   };
 
   const handleRemoveAccount = async (email: string) => {
+    const normalized = email.toLowerCase();
+    setRemovingEmail(normalized);
+    setStatusError(null);
     try {
-      const res = await api.removeDriveAccount(email);
+      const res = await api.removeDriveAccount(normalized);
+      await clearDriveSession(normalized);
+      refreshSessions();
       onSyncDriveState({ driveAccounts: res.driveAccounts });
       setConfirmUnlinkEmail(null);
-      if (activeEmail === email) {
-        const next = res.driveAccounts[0]?.email || '';
-        setActiveEmail(next);
+      if (activeEmail.toLowerCase() === normalized) {
+        const remaining = res.driveAccounts[0]?.email || getCachedDriveSessions()[0]?.email || '';
+        setActiveEmail(remaining);
+        setBreadcrumbs([{ id: 'root', name: 'Mon Drive' }]);
       }
-      onNotify?.(`Compte ${email} dissocié.`);
+      onNotify?.(`Compte Google Drive ${email} supprimé.`);
     } catch (err) {
-      onNotify?.(err instanceof Error ? err.message : 'Erreur lors de la suppression.', 'err');
+      const msg = err instanceof Error ? err.message : 'Erreur lors de la suppression du compte Drive.';
+      setStatusError(msg);
+      onNotify?.(msg, 'err');
+    } finally {
+      setRemovingEmail(null);
     }
   };
 
@@ -206,12 +271,35 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
     setSelectedFileIds((prev) => (prev.includes(fileId) ? prev.filter((id) => id !== fileId) : [...prev, fileId]));
   };
 
+  const allFoldersSelected = folders.length > 0 && folders.every((f) => selectedFolderIds.includes(f.id));
+  const toggleSelectAllFolders = () => {
+    if (allFoldersSelected) {
+      setSelectedFolderIds([]);
+    } else {
+      setSelectedFolderIds(folders.map((f) => f.id));
+    }
+  };
+
+  const visibleSelectableFiles = importMode === 'document' ? documentFiles : filteredMediaFiles;
+  const allVisibleFilesSelected =
+    visibleSelectableFiles.length > 0 && visibleSelectableFiles.every((f) => selectedFileIds.includes(f.id));
+
+  const toggleSelectAllFiles = () => {
+    if (allVisibleFilesSelected) {
+      const visibleSet = new Set(visibleSelectableFiles.map((f) => f.id));
+      setSelectedFileIds((prev) => prev.filter((id) => !visibleSet.has(id)));
+    } else {
+      setSelectedFileIds(visibleSelectableFiles.map((f) => f.id));
+    }
+  };
+
   const handleImportSelectedFolders = async () => {
     if (!activeToken || !activeEmail || selectedFolderIds.length === 0) return;
     setImporting(true);
     setStatusError(null);
     let totalMedia = 0;
     let totalDocs = 0;
+    let totalSkipped = 0;
     try {
       for (const fId of selectedFolderIds) {
         const folderObj = folders.find((f) => f.id === fId);
@@ -227,6 +315,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
         });
         totalMedia += res.imported.length;
         totalDocs += (res.importedDocuments || []).length;
+        totalSkipped += res.skippedCount || 0;
         onSyncDriveState({
           albums: res.albums,
           driveFolders: res.driveFolders,
@@ -237,9 +326,13 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
         }
       }
       setSelectedFolderIds([]);
-      onNotify?.(
-        `Regroupement importé depuis Google Drive : ${totalMedia} média(s)${totalDocs > 0 ? ` et ${totalDocs} document(s)` : ''}.`
-      );
+      if (totalMedia === 0 && totalDocs === 0 && totalSkipped > 0) {
+        onNotify?.('Ces médias sont déjà présents dans l’album sélectionné.');
+      } else {
+        onNotify?.(
+          `Importation réussie : ${totalMedia} média(s)${totalDocs > 0 ? ` et ${totalDocs} document(s)` : ''} importé(s).`
+        );
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erreur d’importation Google Drive.';
       setStatusError(msg);
@@ -258,15 +351,21 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
     setImporting(true);
     setStatusError(null);
     try {
+      const folderIdForApi =
+        currentFolder.id === 'root' || currentFolder.id === 'sharedWithMe' || currentFolder.id === 'recentPhotos'
+          ? undefined
+          : currentFolder.id;
+
       const res = await api.importFromDrive(activeToken, {
         accountEmail: activeEmail,
-        folderId: currentFolder.id === 'root' ? undefined : currentFolder.id,
+        folderId: folderIdForApi,
         folderName: currentFolder.name,
         importKind,
         files: pickedFiles.map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType })),
         createAlbum: !onImportedToForm && !targetAlbumId && importKind !== 'document',
         albumId: targetAlbumId,
-        albumTitle: currentFolder.id === 'root' ? 'Médias Google Drive' : currentFolder.name,
+        albumTitle:
+          folderIdForApi ? currentFolder.name : currentFolder.id === 'recentPhotos' ? 'Photos Google Drive' : 'Médias Google Drive',
         albumCategory
       });
       onSyncDriveState({
@@ -280,13 +379,17 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
       setSelectedFileIds([]);
       const mediaCount = res.imported.length;
       const docsCount = (res.importedDocuments || []).length;
-      onNotify?.(
-        `Importation Google Drive réussie : ${
-          docsCount > 0 && mediaCount === 0
-            ? `${docsCount} document(s) entier(s)`
-            : `${mediaCount} média(s)${docsCount > 0 ? ` et ${docsCount} document(s)` : ''}`
-        }${res.skippedCount > 0 ? ` (${res.skippedCount} déjà présent(s))` : ''}.`
-      );
+      if (mediaCount === 0 && docsCount === 0 && res.skippedCount > 0) {
+        onNotify?.(`Ces ${res.skippedCount} élément(s) étaient déjà importés dans cet album.`);
+      } else {
+        onNotify?.(
+          `Importation Google Drive réussie : ${
+            docsCount > 0 && mediaCount === 0
+              ? `${docsCount} document(s) entier(s)`
+              : `${mediaCount} média(s)${docsCount > 0 ? ` et ${docsCount} document(s)` : ''}`
+          }${res.skippedCount > 0 ? ` (${res.skippedCount} déjà présent(s))` : ''}.`
+        );
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erreur lors de l’importation Google Drive.';
       setStatusError(msg);
@@ -338,11 +441,13 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
   const mergedAccounts: Array<LinkedDriveAccount & { isOnline: boolean }> = [];
   const seenEmails = new Set<string>();
   for (const acc of linkedAccounts) {
-    seenEmails.add(acc.email.toLowerCase());
-    mergedAccounts.push({ ...acc, isOnline: Boolean(getDriveSessionToken(acc.email)) });
+    const lower = acc.email.toLowerCase();
+    seenEmails.add(lower);
+    mergedAccounts.push({ ...acc, isOnline: Boolean(getDriveSessionToken(lower)) });
   }
   for (const s of sessions) {
-    if (!seenEmails.has(s.email)) {
+    const lower = s.email.toLowerCase();
+    if (!seenEmails.has(lower)) {
       mergedAccounts.push({
         email: s.email,
         displayName: s.displayName,
@@ -360,6 +465,14 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
     return <ImageIcon className="h-5 w-5 text-church-blue" />;
   };
 
+  const currentRootId = breadcrumbs[0]?.id || 'root';
+  const selectRootScope = (scope: 'root' | 'sharedWithMe' | 'recentPhotos', label: string) => {
+    setBreadcrumbs([{ id: scope, name: label }]);
+  };
+
+  const openInNewTabUrl =
+    typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}#/portail-eeadci` : '#';
+
   return (
     <div className="space-y-5">
       {/* Barre multi-comptes Google Drive */}
@@ -370,7 +483,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
               Comptes Google Drive reliés ({mergedAccounts.length})
             </h3>
             <p className="text-xs sm:text-sm text-church-muted">
-              Importez depuis Google Drive un document entier (PDF, Google Docs, Word) ou des médias (regroupement complet ou sélection individuelle : photos, vidéos, audios).
+              Lors de la connexion Google, cochez bien la case d’accès à Google Drive, puis sélectionnez vos photos, vidéos ou documents à importer.
             </p>
           </div>
 
@@ -399,18 +512,21 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
         {mergedAccounts.length > 0 && (
           <div className="grid gap-2.5 sm:grid-cols-2">
             {mergedAccounts.map((acc) => {
-              const selected = activeEmail === acc.email;
+              const lower = acc.email.toLowerCase();
+              const selected = activeEmail.toLowerCase() === lower;
+              const isConfirming = confirmUnlinkEmail === lower;
+              const isRemoving = removingEmail === lower;
               return (
                 <div
                   key={acc.email}
-                  className={`flex items-center justify-between gap-2 rounded-xl border p-3 transition-colors ${
-                    selected ? 'border-church-blue bg-white' : 'border-church-line bg-white/80'
+                  className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 transition-colors ${
+                    selected ? 'border-church-blue bg-white shadow-2xs' : 'border-church-line bg-white/80'
                   }`}
                 >
                   <button
                     type="button"
                     onClick={() => {
-                      setActiveEmail(acc.email);
+                      setActiveEmail(lower);
                       setBreadcrumbs([{ id: 'root', name: 'Mon Drive' }]);
                     }}
                     className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
@@ -430,12 +546,13 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
 
                   <div className="flex items-center gap-1.5 shrink-0">
                     {acc.isOnline ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 px-1.5">
                         <CheckCircle2 className="h-3.5 w-3.5" /> Actif
                       </span>
                     ) : (
                       <button
                         type="button"
+                        disabled={connecting}
                         onClick={() => handleConnectAccount(acc.email)}
                         className="btn-secondary min-h-[36px] px-2.5 text-xs"
                       >
@@ -443,22 +560,35 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                       </button>
                     )}
 
-                    {confirmUnlinkEmail === acc.email ? (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveAccount(acc.email)}
-                        className="btn-primary min-h-[36px] bg-red-600 hover:bg-red-700 px-2.5 text-xs"
-                      >
-                        Retirer
-                      </button>
+                    {isConfirming ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={isRemoving}
+                          onClick={() => handleRemoveAccount(acc.email)}
+                          className="btn-primary min-h-[34px] bg-red-600 hover:bg-red-700 px-2.5 text-xs"
+                        >
+                          {isRemoving ? 'Suppression…' : 'Supprimer'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isRemoving}
+                          onClick={() => setConfirmUnlinkEmail(null)}
+                          className="btn-ghost min-h-[34px] px-2 text-xs"
+                        >
+                          Annuler
+                        </button>
+                      </div>
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setConfirmUnlinkEmail(acc.email)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-church-muted hover:bg-red-50 hover:text-red-700"
-                        aria-label={`Dissocier ${acc.email}`}
+                        onClick={() => setConfirmUnlinkEmail(lower)}
+                        className="inline-flex h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium text-red-700 hover:bg-red-50"
+                        title={`Supprimer le compte ${acc.email}`}
+                        aria-label={`Supprimer ${acc.email}`}
                       >
                         <Trash2 className="h-4 w-4" />
+                        <span className="hidden sm:inline">Supprimer</span>
                       </button>
                     )}
                   </div>
@@ -475,61 +605,82 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{statusError}</span>
           </div>
-          <p className="text-xs text-red-800/90 pl-6">
-            Astuce pour débloquer Google Drive : ouvrez{' '}
+          <div className="flex flex-wrap items-center gap-3 pl-6">
+            {activeEmail && (
+              <button
+                type="button"
+                disabled={connecting}
+                onClick={() => handleConnectAccount(activeEmail)}
+                className="btn-secondary min-h-[34px] px-3 text-xs border-red-300 text-red-900 hover:bg-red-100"
+              >
+                Reconnecter {activeEmail}
+              </button>
+            )}
+            {inIframe && (
+              <a
+                href={openInNewTabUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-church-navy underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Ouvrir dans un nouvel onglet
+              </a>
+            )}
             <a
               href="https://console.cloud.google.com/auth/audience?project=gen-lang-client-0797796121"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-semibold underline"
+              className="text-xs font-semibold underline text-red-900"
             >
               Google Cloud Console → Utilisateurs tests
             </a>
-            , ajoutez votre adresse Gmail (et celles des autres administrateurs), puis réessayez.
-          </p>
+          </div>
         </div>
       )}
 
-      {/* Explorateur Google Drive avec les 2 choix explicites */}
+      {/* Explorateur Google Drive avec accès rapide et sélection intuitive */}
       {activeEmail && activeToken ? (
         <div className="rounded-2xl border border-church-line bg-white p-4 sm:p-5 space-y-4">
-          {/* Choix du mode d'importation Google Drive */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-church-line pb-3">
-            <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-church-light p-1 border border-church-line">
+          {/* Emplacements rapides Google Drive */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => {
-                  setImportMode('group-or-single');
-                  setSelectedFileIds([]);
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
-                  importMode === 'group-or-single'
-                    ? 'bg-church-navy text-white shadow-xs'
-                    : 'text-church-dark hover:bg-white'
+                onClick={() => selectRootScope('root', 'Mon Drive')}
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  currentRootId === 'root'
+                    ? 'border-church-blue bg-church-tint text-church-navy'
+                    : 'border-church-line bg-white text-church-muted hover:text-church-navy'
                 }`}
               >
-                <FolderOpen className="h-3.5 w-3.5" />
-                Regroupement entier ou individuel ({mediaFiles.length})
+                <Folder className="h-3.5 w-3.5 text-church-blue" />
+                Mon Drive
               </button>
-
-              {allowDocuments && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setImportMode('document');
-                    setSelectedFileIds([]);
-                    setSelectedFolderIds([]);
-                  }}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
-                    importMode === 'document'
-                      ? 'bg-church-navy text-white shadow-xs'
-                      : 'text-church-dark hover:bg-white'
-                  }`}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  Document entier ({documentFiles.length})
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => selectRootScope('recentPhotos', 'Toutes les photos & vidéos')}
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  currentRootId === 'recentPhotos'
+                    ? 'border-church-blue bg-church-tint text-church-navy'
+                    : 'border-church-line bg-white text-church-muted hover:text-church-navy'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5 text-church-blue" />
+                Toutes mes photos & vidéos
+              </button>
+              <button
+                type="button"
+                onClick={() => selectRootScope('sharedWithMe', 'Partagés avec moi')}
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  currentRootId === 'sharedWithMe'
+                    ? 'border-church-blue bg-church-tint text-church-navy'
+                    : 'border-church-line bg-white text-church-muted hover:text-church-navy'
+                }`}
+              >
+                <Share2 className="h-3.5 w-3.5 text-church-blue" />
+                Partagés avec moi
+              </button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -537,7 +688,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                 <select
                   value={albumCategory}
                   onChange={(e) => setAlbumCategory(e.target.value as AlbumItem['category'])}
-                  className="field min-h-[38px] py-1 text-xs w-auto"
+                  className="field min-h-[36px] py-1 text-xs w-auto"
                   aria-label="Catégorie d'album"
                 >
                   <option value="Cultes">Catégorie : Cultes</option>
@@ -552,7 +703,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                 type="button"
                 onClick={() => loadFolderContents(activeToken, currentFolder.id)}
                 disabled={loadingDrive}
-                className="btn-secondary min-h-[38px] px-3 text-xs"
+                className="btn-secondary min-h-[36px] px-3 text-xs"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loadingDrive ? 'animate-spin' : ''}`} />
                 Actualiser
@@ -560,8 +711,46 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
             </div>
           </div>
 
+          {/* Choix du mode d'importation Google Drive */}
+          {allowDocuments && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-church-light p-1 border border-church-line w-fit">
+              <button
+                type="button"
+                onClick={() => {
+                  setImportMode('group-or-single');
+                  setSelectedFileIds([]);
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
+                  importMode === 'group-or-single'
+                    ? 'bg-church-navy text-white shadow-xs'
+                    : 'text-church-dark hover:bg-white'
+                }`}
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                Photos, vidéos & audios ({mediaFiles.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setImportMode('document');
+                  setSelectedFileIds([]);
+                  setSelectedFolderIds([]);
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
+                  importMode === 'document'
+                    ? 'bg-church-navy text-white shadow-xs'
+                    : 'text-church-dark hover:bg-white'
+                }`}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Document entier ({documentFiles.length})
+              </button>
+            </div>
+          )}
+
           {/* Fil d'Ariane dossiers */}
-          <div className="flex flex-wrap items-center gap-1.5 text-sm">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-church-line pb-2.5 text-sm">
             {breadcrumbs.length > 1 && (
               <button
                 type="button"
@@ -591,13 +780,33 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
             <div className="py-10 text-center text-sm text-church-muted">Chargement de Google Drive…</div>
           ) : (
             <>
-              {/* Sous-dossiers Google Drive (navigation toujours dispo + regroupement en mode group-or-single) */}
+              {/* Sous-dossiers Google Drive */}
               {folders.length > 0 && (
                 <div className="space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-church-muted">
-                      Dossiers ({folders.length})
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-church-muted">
+                        Dossiers ({folders.length})
+                      </p>
+                      {importMode === 'group-or-single' && (
+                        <button
+                          type="button"
+                          onClick={toggleSelectAllFolders}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-church-blue hover:underline"
+                        >
+                          {allFoldersSelected ? (
+                            <>
+                              <CheckSquare className="h-3.5 w-3.5" /> Tout désélectionner
+                            </>
+                          ) : (
+                            <>
+                              <Square className="h-3.5 w-3.5" /> Tout sélectionner ({folders.length})
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+
                     {importMode === 'group-or-single' && selectedFolderIds.length > 0 && (
                       <button
                         type="button"
@@ -608,7 +817,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                         <CloudUpload className="h-4 w-4" />
                         {importing
                           ? 'Importation en cours…'
-                          : `Importer ${selectedFolderIds.length} regroupement(s) entier(s)`}
+                          : `Importer ${selectedFolderIds.length} dossier(s) entier(s)`}
                       </button>
                     )}
                   </div>
@@ -630,8 +839,8 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                               className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${
                                 isChecked ? 'border-church-blue bg-church-blue text-white' : 'border-church-line bg-white'
                               }`}
-                              aria-label={`Sélectionner tout le dossier ${folder.name}`}
-                              title="Cocher pour importer ce dossier en regroupement entier"
+                              aria-label={`Cocher le dossier ${folder.name}`}
+                              title="Cocher pour importer tout le contenu de ce dossier"
                             >
                               {isChecked && <Check className="h-4 w-4" />}
                             </button>
@@ -660,18 +869,33 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                 </div>
               )}
 
-              {/* MODE 1 : IMPORTATION D'UN DOCUMENT ENTIER */}
+              {/* MODE DOCUMENT ENTIER */}
               {importMode === 'document' && allowDocuments && (
                 <div className="space-y-3 pt-1">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
+                    <div className="flex flex-wrap items-center gap-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-church-muted">
-                        Documents entiers dans « {currentFolder.name} » ({documentFiles.length})
+                        Documents dans « {currentFolder.name} » ({documentFiles.length})
                       </p>
-                      <p className="text-xs text-church-muted">
-                        PDF, Word, PowerPoint, Google Docs ou Google Slides — importés en un document complet prêt à afficher et télécharger.
-                      </p>
+                      {documentFiles.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={toggleSelectAllFiles}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-church-blue hover:underline"
+                        >
+                          {allVisibleFilesSelected ? (
+                            <>
+                              <CheckSquare className="h-3.5 w-3.5" /> Tout désélectionner
+                            </>
+                          ) : (
+                            <>
+                              <Square className="h-3.5 w-3.5" /> Tout sélectionner ({documentFiles.length})
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
+
                     {selectedFileIds.length > 0 && (
                       <button
                         type="button"
@@ -700,17 +924,18 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                         const picked = selectedFileIds.includes(doc.id);
                         return (
                           <li key={doc.id} className="flex flex-wrap items-center justify-between gap-3 p-3 hover:bg-church-light/40">
-                            <div className="flex min-w-0 flex-1 items-center gap-3">
-                              <button
-                                type="button"
-                                onClick={() => toggleFileSelect(doc.id)}
+                            <button
+                              type="button"
+                              onClick={() => toggleFileSelect(doc.id)}
+                              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                            >
+                              <span
                                 className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${
                                   picked ? 'border-church-blue bg-church-blue text-white' : 'border-church-line bg-white'
                                 }`}
-                                aria-label={`Sélectionner ${doc.name}`}
                               >
                                 {picked && <Check className="h-3.5 w-3.5" />}
-                              </button>
+                              </span>
                               <FileText className="h-5 w-5 shrink-0 text-church-blue" />
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-medium text-church-navy">{doc.name}</p>
@@ -719,7 +944,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                                   {doc.size ? ` · ${formatFileSize(Number(doc.size))}` : ''}
                                 </p>
                               </div>
-                            </div>
+                            </button>
                             <button
                               type="button"
                               disabled={importing}
@@ -727,7 +952,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                               className="btn-secondary min-h-[36px] px-3 text-xs shrink-0"
                             >
                               <CloudUpload className="h-3.5 w-3.5 text-church-blue" />
-                              {importing ? 'Import…' : 'Importer ce document entier'}
+                              {importing ? 'Import…' : 'Importer'}
                             </button>
                           </li>
                         );
@@ -737,14 +962,31 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                 </div>
               )}
 
-              {/* MODE 2 : IMPORTATION D'UN REGROUPEMENT ENTIER OU AU CHOIX DE MANIÈRE INDIVIDUELLE */}
+              {/* MODE PHOTOS / VIDÉOS / AUDIOS */}
               {importMode === 'group-or-single' && (
                 <div className="space-y-3 pt-1">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2.5">
                       <p className="text-xs font-semibold uppercase tracking-wide text-church-muted">
-                        Médias dans « {currentFolder.name} » ({filteredMediaFiles.length})
+                        Fichiers ({filteredMediaFiles.length})
                       </p>
+                      {filteredMediaFiles.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={toggleSelectAllFiles}
+                          className="inline-flex items-center gap-1 rounded-lg border border-church-line bg-church-light px-2.5 py-1 text-xs font-semibold text-church-navy hover:bg-church-tint"
+                        >
+                          {allVisibleFilesSelected ? (
+                            <>
+                              <CheckSquare className="h-3.5 w-3.5 text-church-blue" /> Tout désélectionner
+                            </>
+                          ) : (
+                            <>
+                              <Square className="h-3.5 w-3.5 text-church-blue" /> Tout sélectionner ({filteredMediaFiles.length})
+                            </>
+                          )}
+                        </button>
+                      )}
                       <div className="flex items-center gap-1 rounded-lg bg-church-light p-0.5 border border-church-line">
                         {(
                           [
@@ -782,7 +1024,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                           className="btn-primary min-h-[38px] text-xs"
                         >
                           <Plus className="h-4 w-4" />
-                          {importing ? 'Import…' : `Importer la sélection individuelle (${selectedFileIds.length})`}
+                          {importing ? 'Import en cours…' : `Importer la sélection (${selectedFileIds.length})`}
                         </button>
                       )}
                       {filteredMediaFiles.length > 0 && (
@@ -792,17 +1034,29 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                           onClick={() => handleImportFiles(filteredMediaFiles, 'media')}
                           className="btn-secondary min-h-[38px] text-xs border-church-blue text-church-navy"
                         >
-                          <FolderOpen className="h-4 w-4 text-church-blue" />
-                          {importing ? 'Import en cours…' : `Importer tout le regroupement (${filteredMediaFiles.length})`}
+                          <CloudUpload className="h-4 w-4 text-church-blue" />
+                          {importing ? 'Import en cours…' : `Tout importer (${filteredMediaFiles.length})`}
                         </button>
                       )}
                     </div>
                   </div>
 
                   {filteredMediaFiles.length === 0 ? (
-                    <p className="rounded-xl border border-dashed border-church-line py-6 text-center text-xs sm:text-sm text-church-muted">
-                      Aucun média (photo, vidéo ou audio) correspondant directement dans ce dossier. Ouvrez un sous-dossier ci-dessus ou basculez vers « Document entier ».
-                    </p>
+                    <div className="rounded-xl border border-dashed border-church-line py-6 px-4 text-center space-y-2">
+                      <p className="text-xs sm:text-sm text-church-muted">
+                        Aucun média affiché directement dans « {currentFolder.name} ».
+                      </p>
+                      {currentRootId !== 'recentPhotos' && (
+                        <button
+                          type="button"
+                          onClick={() => selectRootScope('recentPhotos', 'Toutes les photos & vidéos')}
+                          className="btn-secondary min-h-[36px] text-xs"
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-church-blue" />
+                          Afficher toutes mes photos & vidéos Drive
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <div className={`grid gap-2.5 ${compact ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-4 md:grid-cols-5'}`}>
                       {filteredMediaFiles.map((item) => {
@@ -814,7 +1068,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                             type="button"
                             onClick={() => toggleFileSelect(item.id)}
                             className={`group relative overflow-hidden rounded-xl border text-left transition-all ${
-                              picked ? 'border-church-blue ring-2 ring-church-blue/30' : 'border-church-line'
+                              picked ? 'border-church-blue ring-2 ring-church-blue/40 bg-church-tint/20' : 'border-church-line hover:border-church-blue/50'
                             }`}
                           >
                             {item.thumbnailLink && item.kind === 'photo' ? (
@@ -851,8 +1105,8 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
                             )}
 
                             <span
-                              className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border ${
-                                picked ? 'border-church-blue bg-church-blue text-white' : 'border-white/80 bg-black/40 text-white'
+                              className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border shadow-xs ${
+                                picked ? 'border-church-blue bg-church-blue text-white' : 'border-white/90 bg-black/45 text-white'
                               }`}
                             >
                               {picked && <Check className="h-3.5 w-3.5" />}
@@ -873,7 +1127,7 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
       ) : activeEmail ? (
         <div className="rounded-2xl border border-dashed border-church-line bg-white p-6 text-center space-y-3">
           <p className="text-sm text-church-dark">
-            Pour parcourir les dossiers et fichiers de <strong>{activeEmail}</strong>, reconnectez votre session Google Drive en un clic.
+            Pour parcourir les dossiers et photos de <strong>{activeEmail}</strong>, reconnectez votre session Google Drive en un clic.
           </p>
           <button
             type="button"

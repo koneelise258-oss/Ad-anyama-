@@ -55,8 +55,11 @@ export default defineConfig(() => {
         },
         workbox: {
           importScripts: ['/push-sw.js'],
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
+          navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/__\//],
           runtimeCaching: [
             {
               urlPattern: /^\/api\/public\/data$/i,
@@ -104,7 +107,7 @@ export default defineConfig(() => {
           ]
         },
         devOptions: {
-          enabled: true,
+          enabled: false,
           type: 'module'
         }
       })

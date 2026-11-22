@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Culte } from '../types';
-import { HERO_IMAGE } from '../mockData';
 import { buildDownloadUrl, isDirectVideoUrl, sanitizeUrl, toSafeYoutubeEmbed } from '../utils/security';
 import { Play, Download, ThumbsUp, Heart, Flag, Headphones, Eye, ExternalLink } from 'lucide-react';
 import { BackBar, BlockTitle, Lightbox, Meta, formatDate, useToast } from './ui';
@@ -156,9 +155,13 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
                 allowFullScreen
               />
             )
-          ) : (
+          ) : sanitizeUrl(culte.coverImage) || (culte.hasVideo && safeVideo) ? (
             <div className="relative">
-              <img src={sanitizeUrl(culte.coverImage) || HERO_IMAGE} alt={culte.title} className="aspect-video w-full object-cover" />
+              {sanitizeUrl(culte.coverImage) ? (
+                <img src={sanitizeUrl(culte.coverImage)} alt={culte.title} className="aspect-video w-full object-cover" />
+              ) : (
+                <div className="aspect-video w-full bg-gradient-to-br from-church-navy to-church-blue/90" />
+              )}
               {culte.hasVideo && safeVideo && (
                 <button
                   onClick={() => setPlaying(true)}
@@ -172,7 +175,7 @@ export const CulteDetailPage: React.FC<CulteDetailPageProps> = ({
                 </button>
               )}
             </div>
-          )}
+          ) : null}
 
           {culte.hasVideo && safeVideo && (
             <div className="flex flex-wrap items-center justify-between gap-2 bg-white px-4 py-3 border-t border-church-line">

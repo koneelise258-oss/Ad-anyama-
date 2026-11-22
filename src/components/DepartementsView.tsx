@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { DepartmentItem } from '../types';
-import { HERO_IMAGE } from '../mockData';
 import { sanitizeUrl } from '../utils/security';
 import { ChevronRight, Search } from 'lucide-react';
 import { PageIntro, EmptyState } from './ui';
@@ -56,20 +55,26 @@ export const DepartementsView: React.FC<DepartementsViewProps> = ({ departments,
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((dept) => {
               const logo = sanitizeUrl(dept.logoUrl);
-              const cover = sanitizeUrl(dept.coverImage) || HERO_IMAGE;
+              const cover = sanitizeUrl(dept.coverImage);
               return (
                 <li key={dept.id}>
                   <button
                     onClick={() => onSelectDepartment(dept)}
                     className="surface surface-interactive group flex h-full w-full items-center gap-4 overflow-hidden p-3 text-left"
                   >
-                    <img
-                      src={logo || cover}
-                      alt={logo ? `Logo ${dept.name}` : dept.name}
-                      className={`h-20 w-20 shrink-0 rounded-xl sm:h-24 sm:w-24 ${
-                        logo ? 'border border-church-line bg-white object-contain p-1.5' : 'object-cover bg-church-navy'
-                      }`}
-                    />
+                    {logo || cover ? (
+                      <img
+                        src={logo || cover}
+                        alt={logo ? `Logo ${dept.name}` : dept.name}
+                        className={`h-20 w-20 shrink-0 rounded-xl sm:h-24 sm:w-24 ${
+                          logo ? 'border border-church-line bg-white object-contain p-1.5' : 'object-cover bg-church-navy'
+                        }`}
+                      />
+                    ) : (
+                      <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-church-line bg-church-tint font-serif text-base font-bold uppercase text-church-navy sm:h-24 sm:w-24">
+                        {(dept.code || dept.name).slice(0, 6)}
+                      </span>
+                    )}
                     <span className="min-w-0 flex-1">
                       <span className="block text-[11px] font-semibold uppercase tracking-wide text-church-blue">
                         {dept.code}

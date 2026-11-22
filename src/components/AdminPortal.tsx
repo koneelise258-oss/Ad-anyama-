@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AdminSubPage,
   AdminUserPublic,
@@ -23,7 +23,7 @@ import {
   SecuritySettings,
   SiteImages
 } from '../types';
-import { DEFAULT_CHURCH_SETTINGS, DEFAULT_HERO_CONTENT, DEFAULT_SITE_IMAGES, HERO_IMAGE } from '../mockData';
+import { DEFAULT_CHURCH_SETTINGS, DEFAULT_HERO_CONTENT, DEFAULT_SITE_IMAGES } from '../mockData';
 import { api } from '../services/api';
 import { extractYoutubeThumbnail, sanitizeUrl, toSafeYoutubeEmbed } from '../utils/security';
 import { CULTE_TYPE_LABELS, inferCulteServiceType, sortCultesByDateDesc } from '../utils/cultes';
@@ -156,6 +156,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [showEventDrivePicker, setShowEventDrivePicker] = useState(false);
   const [showNewsDrivePicker, setShowNewsDrivePicker] = useState(false);
   const [showAlbumDrivePicker, setShowAlbumDrivePicker] = useState(false);
+  const [showHeroDrivePicker, setShowHeroDrivePicker] = useState(false);
 
   const notify = (msg: string, type: 'ok' | 'err' = 'ok') => {
     setToast({ type, msg });
@@ -187,7 +188,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       sermonSummary: '',
       keyPoints: [],
       liturgy: [],
-      coverImage: siteImages.pastorImage || '',
+      coverImage: '',
       photos: [],
       videoUrl: '',
       videoDuration: '',
@@ -563,6 +564,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     churchSettings.announcementBanner || { enabled: false, text: '', linkPage: 'evenements' as PageView }
   );
 
+  useEffect(() => {
+    setHeroDraft(heroContent);
+  }, [heroContent]);
+
+  useEffect(() => {
+    setImagesDraft(siteImages);
+  }, [siteImages]);
+
+  useEffect(() => {
+    setLogoDraft(officialLogoUrl);
+  }, [officialLogoUrl]);
+
+  useEffect(() => {
+    setBannerDraft(
+      churchSettings.announcementBanner || { enabled: false, text: '', linkPage: 'evenements' as PageView }
+    );
+  }, [churchSettings.announcementBanner]);
+
   const handleSaveMediaAndHero = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -598,6 +617,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     homeSections: churchSettings.homeSections || DEFAULT_CHURCH_SETTINGS.homeSections,
     schedules: churchSettings.schedules || DEFAULT_CHURCH_SETTINGS.schedules
   });
+
+  useEffect(() => {
+    setSettingsDraft({
+      ...DEFAULT_CHURCH_SETTINGS,
+      ...churchSettings,
+      theme: churchSettings.theme || DEFAULT_CHURCH_SETTINGS.theme,
+      homeSections: churchSettings.homeSections || DEFAULT_CHURCH_SETTINGS.homeSections,
+      schedules: churchSettings.schedules || DEFAULT_CHURCH_SETTINGS.schedules
+    });
+  }, [churchSettings]);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -636,6 +665,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // --- Cybersécurité & Liste blanche Google ---
   const [secDraft, setSecDraft] = useState<SecuritySettings>(security);
+
+  useEffect(() => {
+    setSecDraft(security);
+  }, [security]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState('Administrateur');
@@ -933,6 +966,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     </button>
                     <button onClick={() => onNavigateSubPage('drive')} className="btn-secondary justify-start">
                       <HardDrive className="h-4 w-4 text-church-blue" /> Synchroniser Drive
+                    </button>
+                    <button onClick={() => onNavigateSubPage('medias')} className="btn-secondary justify-start">
+                      <Palette className="h-4 w-4 text-church-blue" /> Image de fond Héros
                     </button>
                   </div>
                 </div>
@@ -1576,11 +1612,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   {events.map((ev) => (
                     <div key={ev.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-3 min-w-0">
-                        <img
-                          src={sanitizeUrl(ev.coverImage) || HERO_IMAGE}
-                          alt=""
-                          className="h-14 w-14 shrink-0 rounded-xl object-cover bg-church-navy"
-                        />
+                        {sanitizeUrl(ev.coverImage) ? (
+                          <img
+                            src={sanitizeUrl(ev.coverImage)}
+                            alt=""
+                            className="h-14 w-14 shrink-0 rounded-xl object-cover bg-church-navy"
+                          />
+                        ) : (
+                          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-church-tint text-church-blue">
+                            <CalendarDays className="h-6 w-6" aria-hidden="true" />
+                          </span>
+                        )}
                         <div className="min-w-0">
                           <span className="text-xs font-semibold text-church-blue">{ev.category} · {ev.date}</span>
                           <h3 className="font-serif text-lg text-church-navy truncate">{ev.title}</h3>
@@ -2374,11 +2416,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {albums.map((alb) => (
                     <div key={alb.id} className="surface overflow-hidden">
-                      <img
-                        src={sanitizeUrl(alb.coverImage) || HERO_IMAGE}
-                        alt={alb.title}
-                        className="aspect-[4/3] w-full object-cover bg-church-navy"
-                      />
+                      {sanitizeUrl(alb.coverImage) ? (
+                        <img
+                          src={sanitizeUrl(alb.coverImage)}
+                          alt={alb.title}
+                          className="aspect-[4/3] w-full object-cover bg-church-navy"
+                        />
+                      ) : (
+                        <div className="flex aspect-[4/3] w-full items-center justify-center bg-church-navy">
+                          <Images className="h-9 w-9 text-white/75" aria-hidden="true" />
+                        </div>
+                      )}
                       <div className="p-4 space-y-2">
                         <div className="text-xs font-semibold text-church-blue">
                           {alb.category} · {alb.mediaCount || alb.items.length} média(s) · {alb.viewsCount || 0} vue(s)
@@ -3094,41 +3142,104 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
               <div className="surface p-5 sm:p-6 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-2xl">Images principales du site</h2>
-                  <button
-                    type="button"
-                    onClick={() => setImagesDraft(DEFAULT_SITE_IMAGES)}
-                    className="btn-ghost text-xs"
-                  >
-                    Réinitialiser les images par défaut
-                  </button>
+                  <div>
+                    <h2 className="text-2xl">Image de fond de la section Héros (Accueil)</h2>
+                    <p className="text-xs text-church-muted">
+                      Photo affichée en plein écran en haut de la page d’accueil. Modifiable par fichier local, lien direct ou Google Drive.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowHeroDrivePicker((v) => !v)}
+                      className="btn-secondary min-h-[36px] text-xs"
+                    >
+                      <HardDrive className="h-3.5 w-3.5 text-church-blue" />
+                      {showHeroDrivePicker ? 'Masquer Drive' : 'Choisir depuis Google Drive'}
+                    </button>
+                    {sanitizeUrl(imagesDraft.heroImage) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setImagesDraft({
+                            heroImage: '',
+                            pastorImage: '',
+                            choirImage: '',
+                            youthImage: ''
+                          })
+                        }
+                        className="btn-ghost text-xs text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Supprimer la photo (fond bleu sobre)
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="grid gap-5 sm:grid-cols-2">
-                  {(
-                    [
-                      { key: 'heroImage', label: 'Image de fond d’accueil' },
-                      { key: 'pastorImage', label: 'Image Prédication / Chaire' },
-                      { key: 'choirImage', label: 'Image Louange / Chorale' },
-                      { key: 'youthImage', label: 'Image Jeunesse' }
-                    ] as const
-                  ).map(({ key, label }) => (
-                    <div key={key} className="rounded-2xl border border-church-line p-4 space-y-3">
-                      <p className="text-sm font-semibold text-church-navy">{label}</p>
+
+                {showHeroDrivePicker && (
+                  <GoogleDriveBrowser
+                    compact
+                    allowDocuments={false}
+                    linkedAccounts={driveAccounts}
+                    linkedFolders={driveFolders}
+                    defaultCategory="Cultes"
+                    onSyncDriveState={(patch) => {
+                      onSyncDriveState(patch);
+                      if (patch.albums) onSyncPublicState({ albums: patch.albums });
+                    }}
+                    onImportedToForm={(items) => {
+                      const firstPhoto = items.find((it) => it.type === 'photo');
+                      if (firstPhoto) {
+                        setImagesDraft((prev) => ({ ...prev, heroImage: firstPhoto.url }));
+                        setShowHeroDrivePicker(false);
+                        notify('Image sélectionnée. Cliquez sur « Enregistrer » ci-dessous pour appliquer.');
+                      } else {
+                        notify('Veuillez sélectionner une photo pour le fond de la section Héros.', 'err');
+                      }
+                    }}
+                    onNotify={notify}
+                  />
+                )}
+
+                <div className="grid gap-5 md:grid-cols-[1.2fr_1fr] items-start">
+                  <div className="overflow-hidden rounded-2xl border border-church-line bg-church-navy">
+                    {sanitizeUrl(imagesDraft.heroImage) ? (
                       <img
-                        src={sanitizeUrl(imagesDraft[key]) || DEFAULT_SITE_IMAGES[key]}
-                        alt={label}
-                        className="aspect-[16/9] w-full rounded-xl object-cover bg-church-navy"
+                        src={sanitizeUrl(imagesDraft.heroImage)}
+                        alt="Aperçu du fond de la section Héros"
+                        className="aspect-[16/9] w-full object-cover"
                       />
-                      <MediaBatchUploader
-                        mode="single-image"
-                        label="Remplacer l’image"
-                        allowFolder={false}
-                        onUploadedFiles={(res) => {
-                          if (res[0]) setImagesDraft((prev) => ({ ...prev, [key]: res[0].url }));
-                        }}
+                    ) : (
+                      <div className="flex aspect-[16/9] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-[#0F244A] via-church-navy to-[#244E99] p-6 text-center text-white">
+                        <p className="font-serif text-lg">Fond bleu sobre (aucune photo sélectionnée)</p>
+                        <p className="text-xs text-white/75">
+                          Importez une photo de votre choix ci-contre ou laissez ce fond sobre.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-church-navy">
+                        Lien direct ou chemin de l’image
+                      </label>
+                      <input
+                        value={imagesDraft.heroImage || ''}
+                        onChange={(e) => setImagesDraft((prev) => ({ ...prev, heroImage: e.target.value }))}
+                        placeholder="https://... ou importer une photo ci-dessous"
+                        className="field text-sm"
                       />
                     </div>
-                  ))}
+                    <MediaBatchUploader
+                      mode="single-image"
+                      label="Importer une nouvelle photo de fond (JPG, PNG, WebP)"
+                      allowFolder={false}
+                      onUploadedFiles={(res) => {
+                        if (res[0]) setImagesDraft((prev) => ({ ...prev, heroImage: res[0].url }));
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 

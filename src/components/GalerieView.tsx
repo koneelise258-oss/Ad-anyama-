@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { AlbumItem } from '../types';
-import { HERO_IMAGE } from '../mockData';
 import { sanitizeUrl } from '../utils/security';
 import { Images, Play } from 'lucide-react';
 import { PageIntro, EmptyState, formatDate } from './ui';
@@ -61,11 +60,17 @@ export const GalerieView: React.FC<GalerieViewProps> = ({ albums, onSelectAlbum 
                     className="surface surface-interactive group block w-full overflow-hidden text-left"
                   >
                     <span className="relative block overflow-hidden bg-church-navy">
-                      <img
-                        src={sanitizeUrl(alb.coverImage) || HERO_IMAGE}
-                        alt={alb.title}
-                        className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                      />
+                      {sanitizeUrl(alb.coverImage) ? (
+                        <img
+                          src={sanitizeUrl(alb.coverImage)}
+                          alt={alb.title}
+                          className="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                        />
+                      ) : (
+                        <span className="flex aspect-[4/3] w-full items-center justify-center bg-gradient-to-br from-church-navy to-church-blue/90">
+                          <Images className="h-10 w-10 text-white/75" aria-hidden="true" />
+                        </span>
+                      )}
                       <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1 text-xs font-semibold text-church-navy shadow-xs">
                         {alb.type === 'video' ? (
                           <Play className="h-3.5 w-3.5 text-church-blue" aria-hidden="true" />

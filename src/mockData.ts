@@ -8,21 +8,16 @@ import {
   HeroContent,
   ChurchSettings
 } from './types';
-import heroImg from './assets/images/church_hero_worship_1793042690258.jpg';
-import pastorImg from './assets/images/pastor_sermon_pulpit_1793042690731.jpg';
-import choirImg from './assets/images/church_choir_praise_1793042691389.jpg';
-import youthImg from './assets/images/youth_fellowship_jadci_1793042690601.jpg';
-
-export const HERO_IMAGE = heroImg;
-export const PASTOR_IMAGE = pastorImg;
-export const CHOIR_IMAGE = choirImg;
-export const YOUTH_IMAGE = youthImg;
+export const HERO_IMAGE = '';
+export const PASTOR_IMAGE = '';
+export const CHOIR_IMAGE = '';
+export const YOUTH_IMAGE = '';
 
 export const DEFAULT_SITE_IMAGES: SiteImages = {
-  heroImage: HERO_IMAGE,
-  pastorImage: PASTOR_IMAGE,
-  choirImage: CHOIR_IMAGE,
-  youthImage: YOUTH_IMAGE
+  heroImage: '',
+  pastorImage: '',
+  choirImage: '',
+  youthImage: ''
 };
 
 export const DEFAULT_HERO_CONTENT: HeroContent = {
@@ -99,7 +94,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingLocation: '',
     activities: [],
     logoUrl: '/logos/ecodim.png',
-    coverImage: YOUTH_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -115,7 +110,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingLocation: '',
     activities: [],
     logoUrl: '/logos/aoc.png',
-    coverImage: CHOIR_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -130,7 +125,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingSchedule: '',
     meetingLocation: '',
     activities: [],
-    coverImage: PASTOR_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -146,7 +141,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingLocation: '',
     activities: [],
     logoUrl: '/logos/jadci.jpg',
-    coverImage: YOUTH_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -161,7 +156,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingSchedule: '',
     meetingLocation: '',
     activities: [],
-    coverImage: CHOIR_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -176,7 +171,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingSchedule: '',
     meetingLocation: '',
     activities: [],
-    coverImage: CHOIR_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -191,7 +186,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingSchedule: '',
     meetingLocation: '',
     activities: [],
-    coverImage: CHOIR_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -206,7 +201,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingSchedule: '',
     meetingLocation: '',
     activities: [],
-    coverImage: HERO_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -221,7 +216,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingSchedule: '',
     meetingLocation: '',
     activities: [],
-    coverImage: HERO_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -236,7 +231,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingSchedule: '',
     meetingLocation: '',
     activities: [],
-    coverImage: CHOIR_IMAGE,
+    coverImage: '',
     galleryImages: []
   },
   {
@@ -251,7 +246,7 @@ export const INITIAL_DEPARTMENTS: DepartmentItem[] = [
     meetingSchedule: '',
     meetingLocation: '',
     activities: [],
-    coverImage: HERO_IMAGE,
+    coverImage: '',
     galleryImages: []
   }
 ];

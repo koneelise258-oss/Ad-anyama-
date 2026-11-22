@@ -31,7 +31,7 @@ import {
   DEFAULT_CHURCH_SETTINGS
 } from './mockData';
 import { api, setSessionToken } from './services/api';
-import { clearDriveSession } from './services/googleDrive';
+import { clearDriveSession, consumeGoogleRedirectResult } from './services/googleDrive';
 import { Header } from './components/Header';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { HomeView } from './components/HomeView';
@@ -99,6 +99,7 @@ export default function App() {
   const [pushHistory, setPushHistory] = useState<PushNotificationRecord[]>([]);
   const [driveAccounts, setDriveAccounts] = useState<LinkedDriveAccount[]>([]);
   const [driveFolders, setDriveFolders] = useState<LinkedDriveFolder[]>([]);
+  const [authRedirectError, setAuthRedirectError] = useState('');
 
   // Modales légères
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -220,6 +221,56 @@ export default function App() {
       // Token expiré ou session fermée
     }
   }, []);
+
+  // Reprise automatique après redirection Google (PWA épinglée / mobile / popup bloquée)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const redirectResult = await consumeGoogleRedirectResult();
+        if (cancelled || !redirectResult) return;
+
+        if (redirectResult.mode === 'admin') {
+          const res = await api.loginWithGoogle(redirectResult.idToken);
+          if (cancelled) return;
+          setSessionToken(res.token);
+          setAuthStatus({ needsSetup: false, authenticated: true, currentAdmin: res.admin });
+          await loadAdminBootstrap();
+          setAuthRedirectError('');
+          setActivePage('admin');
+          window.history.replaceState({ page: 'accueil' }, '', `${window.location.pathname}?page=accueil`);
+        } else if (redirectResult.mode === 'drive') {
+          const st = await api.getAuthStatus().catch(() => ({
+            needsSetup: false,
+            authenticated: false,
+            currentAdmin: null
+          }));
+          if (cancelled) return;
+          setAuthStatus(st);
+          if (st.authenticated) {
+            const saved = await api.saveDriveAccount({
+              email: redirectResult.driveSession.email,
+              displayName: redirectResult.driveSession.displayName,
+              photoLink: redirectResult.driveSession.photoLink
+            });
+            setDriveAccounts(saved.driveAccounts);
+            await loadAdminBootstrap();
+            setAdminSubPage('drive');
+            setActivePage('admin');
+          }
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : 'Erreur lors de la connexion Google.';
+        setAuthRedirectError(msg);
+        setActivePage('admin');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAdminBootstrap]);
 
   // Ouverture discrète du portail Admin (aucun changement d'URL publique)
   const openHiddenAdmin = useCallback(async () => {
@@ -574,11 +625,16 @@ export default function App() {
         return (
           <AdminAuthGate
             authStatus={authStatus}
+            initialError={authRedirectError}
             onAuthenticated={async (admin) => {
+              setAuthRedirectError('');
               setAuthStatus({ needsSetup: false, authenticated: true, currentAdmin: admin });
               await loadAdminBootstrap();
             }}
-            onCancel={() => navigateTo('accueil')}
+            onCancel={() => {
+              setAuthRedirectError('');
+              navigateTo('accueil');
+            }}
           />
         );
       }

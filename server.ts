@@ -508,16 +508,22 @@ const loadStore = (): StoreData => {
       }
       let loadedDepartments =
         Array.isArray(parsed.departments) && parsed.departments.length > 0 ? [...parsed.departments] : [...def.departments];
-      // Migration idempotente : s'assurer que AOC existe, corriger MIFA, attacher les logos EEADCI vérifiés (sans écraser les logos personnalisés) et placer ECODIM, AOC, HAC, JADCI en tête
+      // Migration idempotente : s'assurer que AOC et HAC existent, retirer l'entrée erronée ARC, attacher les logos EEADCI vérifiés et placer ECODIM, AOC, HAC en tête
       const defaultById = new Map(def.departments.map((d) => [d.id, d]));
-      const aocDef = defaultById.get('aoc');
-      if (aocDef && !loadedDepartments.some((d) => d.id === 'aoc')) {
-        loadedDepartments.push({ ...aocDef });
+      loadedDepartments = loadedDepartments.filter((d) => d.id !== 'arc');
+      for (const requiredId of ['aoc', 'hac']) {
+        const refDept = defaultById.get(requiredId);
+        if (refDept && !loadedDepartments.some((d) => d.id === requiredId)) {
+          loadedDepartments.push({ ...refDept });
+        }
       }
       loadedDepartments = loadedDepartments.map((d) => {
         const ref = defaultById.get(d.id);
-        if (!ref) return d;
         const next = { ...d };
+        if (next.coverImage && /church_hero_worship|pastor_sermon_pulpit|church_choir_praise|youth_fellowship_jadci/i.test(next.coverImage)) {
+          next.coverImage = '';
+        }
+        if (!ref) return next;
         if (ref.logoUrl && !next.logoUrl) next.logoUrl = ref.logoUrl;
         if (!next.tagline && ref.tagline) next.tagline = ref.tagline;
         if (d.id === 'mifa' && d.description === 'Ministère des femmes de l’assemblée locale.') {
@@ -538,12 +544,23 @@ const loadStore = (): StoreData => {
           .filter((d): d is any => Boolean(d)),
         ...loadedDepartments.filter((d) => !priorityIds.includes(d.id))
       ];
+      const mergedSiteImages = {
+        ...def.siteImages,
+        ...(parsed.siteImages || {})
+      };
+      if (
+        !mergedSiteImages.heroImage ||
+        mergedSiteImages.heroImage === '/images/hero-church.jpg' ||
+        /church_hero_worship|pastor_sermon_pulpit|church_choir_praise|youth_fellowship_jadci/i.test(mergedSiteImages.heroImage)
+      ) {
+        mergedSiteImages.heroImage = '';
+      }
       return {
         ...def,
         ...parsed,
         churchSettings: mergedChurchSettings,
         heroContent: mergedHero,
-        siteImages: { ...def.siteImages, ...(parsed.siteImages || {}) },
+        siteImages: mergedSiteImages,
         security: { ...def.security, ...(parsed.security || {}) },
         cultes: Array.isArray(parsed.cultes) ? parsed.cultes : def.cultes,
         events: Array.isArray(parsed.events) ? parsed.events : def.events,
@@ -1312,6 +1329,7 @@ app.post('/api/auth/google', async (req, res) => {
     invite.registeredAt = invite.registeredAt || nowIso;
 
     appendSecurityLog('Connexion Google réussie', admin.name, `Accès administrateur (${verifiedEmail}).`, 'info');
+    saveStore(store);
 
     const token = signToken(admin.id, store.security.sessionTimeoutMinutes || 120);
     setSessionCookie(res, token, store.security.sessionTimeoutMinutes || 120);
@@ -2087,19 +2105,40 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
   };
 
   try {
-    // Si un dossier complet est sélectionné sans liste explicite, lister automatiquement tous les fichiers pris en charge du dossier Drive
-    if (folderId && filesToImport.length === 0) {
-      const q = `'${folderId.replace(/'/g, '')}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`;
-      const listUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType)&pageSize=100&includeItemsFromAllDrives=true&supportsAllDrives=true`;
+    const listDriveChildren = async (parentId: string) => {
+      const q = `'${parentId.replace(/'/g, '')}' in parents and trashed = false`;
+      const listUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,shortcutDetails)&pageSize=100&includeItemsFromAllDrives=true&supportsAllDrives=true`;
       const listRes = await fetch(listUrl, {
         headers: { Authorization: `Bearer ${driveToken}` }
       });
       const listJson = (await listRes.json().catch(() => ({}))) as { files?: any[]; error?: { message?: string } };
       if (!listRes.ok) {
-        res.status(listRes.status).json({ error: listJson?.error?.message || 'Erreur lors de la lecture du dossier Google Drive.' });
-        return;
+        const err: any = new Error(listJson?.error?.message || 'Erreur lors de la lecture du dossier Google Drive.');
+        err.statusCode = listRes.status;
+        throw err;
       }
-      filesToImport = (Array.isArray(listJson.files) ? listJson.files : []).filter((f) => {
+      return (Array.isArray(listJson.files) ? listJson.files : []).map((f) =>
+        f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails?.targetId
+          ? { ...f, id: f.shortcutDetails.targetId, mimeType: f.shortcutDetails.targetMimeType || f.mimeType }
+          : f
+      );
+    };
+
+    // Si un dossier complet est sélectionné sans liste explicite, lister ses fichiers (+ 1 niveau de sous-dossiers si vide directement)
+    if (folderId && filesToImport.length === 0) {
+      const entries = await listDriveChildren(folderId);
+      const subFolders = entries.filter((f) => f.mimeType === 'application/vnd.google-apps.folder');
+      const directFiles = entries.filter((f) => f.mimeType !== 'application/vnd.google-apps.folder');
+      const collected = [...directFiles];
+
+      if (collected.length === 0 && subFolders.length > 0) {
+        for (const sf of subFolders.slice(0, 12)) {
+          const nested = await listDriveChildren(sf.id);
+          collected.push(...nested.filter((nf) => nf.mimeType !== 'application/vnd.google-apps.folder'));
+        }
+      }
+
+      filesToImport = collected.filter((f) => {
         const cls = classifyDriveEntry(f.mimeType || '', f.name || '');
         if (!cls) return false;
         if (importKind === 'media') return cls.kind !== 'document';
@@ -2145,6 +2184,9 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
     }> = [];
 
     let skippedCount = 0;
+    let failedCount = 0;
+    let firstErrorStatus = 0;
+    let firstErrorMessage = '';
 
     for (const df of filesToImport.slice(0, 80)) {
       if (!df?.id) continue;
@@ -2163,11 +2205,32 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
       const mediaRes = await fetch(fetchUrl, {
         headers: { Authorization: `Bearer ${driveToken}` }
       });
-      if (!mediaRes.ok) continue;
+      if (!mediaRes.ok) {
+        failedCount += 1;
+        const errPayload = (await mediaRes.json().catch(() => ({}))) as { error?: { message?: string } };
+        if (mediaRes.status === 401) {
+          res.status(401).json({
+            error: 'Session Google Drive expirée. Veuillez cliquer sur « Reconnecter » puis relancer l’importation.'
+          });
+          return;
+        }
+        if (!firstErrorStatus) {
+          firstErrorStatus = mediaRes.status;
+          firstErrorMessage =
+            errPayload?.error?.message ||
+            (mediaRes.status === 403
+              ? 'Autorisation Google Drive refusée : reconnectez le compte et cochez bien la case d’accès à Google Drive.'
+              : `Erreur Google Drive (${mediaRes.status})`);
+        }
+        continue;
+      }
 
       const arrBuf = await mediaRes.arrayBuffer();
       const buf = Buffer.from(arrBuf);
-      if (buf.length === 0 || buf.length > 150 * 1024 * 1024) continue;
+      if (buf.length === 0 || buf.length > 150 * 1024 * 1024) {
+        failedCount += 1;
+        continue;
+      }
 
       const safeFileName = `drive-${Date.now()}-${crypto.randomBytes(5).toString('hex')}${cls.ext}`;
       fs.writeFileSync(path.join(UPLOADS_DIR, safeFileName), buf);
@@ -2198,6 +2261,15 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
           driveAccountEmail: accountEmail
         });
       }
+    }
+
+    if (importedMedia.length === 0 && importedDocuments.length === 0 && skippedCount === 0) {
+      res.status(firstErrorStatus === 403 ? 403 : 400).json({
+        error:
+          firstErrorMessage ||
+          `Aucun des ${failedCount || filesToImport.length} fichier(s) n’a pu être téléchargé depuis Google Drive.`
+      });
+      return;
     }
 
     const nowIso = new Date().toISOString();

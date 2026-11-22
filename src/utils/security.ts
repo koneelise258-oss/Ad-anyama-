@@ -12,11 +12,12 @@ export const sanitizeUrl = (raw?: string | null, allowDataImage = true): string 
   const trimmed = raw.trim();
   if (!trimmed || trimmed === '#') return '';
 
-  // Chemins relatifs locaux autorisés (/uploads/..., /assets/..., /logos/..., /src/...)
+  // Chemins relatifs locaux autorisés (/uploads/..., /assets/..., /logos/..., /images/..., /src/...)
   if (
     trimmed.startsWith('/uploads/') ||
     trimmed.startsWith('/assets/') ||
     trimmed.startsWith('/logos/') ||
+    trimmed.startsWith('/images/') ||
     trimmed.startsWith('/src/')
   ) {
     return trimmed;

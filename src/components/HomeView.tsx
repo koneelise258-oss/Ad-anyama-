@@ -10,7 +10,7 @@ import {
   HeroContent,
   ChurchSettings
 } from '../types';
-import { HERO_IMAGE, DEFAULT_CHURCH_SETTINGS } from '../mockData';
+import { DEFAULT_CHURCH_SETTINGS } from '../mockData';
 import { sanitizeUrl } from '../utils/security';
 import { CULTE_TYPE_LABELS, inferCulteServiceType, sortCultesByDateDesc } from '../utils/cultes';
 import {
@@ -23,7 +23,8 @@ import {
   Headphones,
   Megaphone,
   Landmark,
-  Clock
+  Clock,
+  BookOpen
 } from 'lucide-react';
 import { SectionHead, Meta, DateBlock, formatDate, formatPublishedDateTime } from './ui';
 
@@ -104,16 +105,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
       {/* 1. Section Hero plein écran (sans bulle, bord à bord) */}
       <section className="relative flex min-h-[calc(100svh-3.5rem)] sm:min-h-[calc(100svh-4rem)] w-full flex-col justify-between overflow-hidden bg-church-navy text-white">
         <div className="absolute inset-0">
-          <img
-            src={sanitizeUrl(siteImages?.heroImage) || HERO_IMAGE}
-            alt="Église Évangélique des Assemblées de Dieu d’Anyama"
-            referrerPolicy="no-referrer"
-            className="h-full w-full object-cover object-center"
-          />
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 bg-gradient-to-t from-church-navy via-church-navy/75 to-church-navy/40"
-          />
+          {sanitizeUrl(siteImages?.heroImage) ? (
+            <>
+              <img
+                src={sanitizeUrl(siteImages?.heroImage)}
+                alt="Église Évangélique des Assemblées de Dieu d’Anyama"
+                referrerPolicy="no-referrer"
+                className="h-full w-full object-cover object-center"
+              />
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 bg-gradient-to-t from-church-navy via-church-navy/75 to-church-navy/40"
+              />
+            </>
+          ) : (
+            <div
+              aria-hidden="true"
+              className="h-full w-full bg-gradient-to-br from-[#0F244A] via-church-navy to-[#244E99]"
+            />
+          )}
         </div>
 
         <div className="relative flex-1 flex items-center">
@@ -225,11 +235,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       className="group relative block h-full w-full"
                       aria-label={latestCulte.hasVideo ? `Lire la vidéo : ${latestCulte.title}` : latestCulte.title}
                     >
-                      <img
-                        src={sanitizeUrl(latestCulte.coverImage) || HERO_IMAGE}
-                        alt={latestCulte.title}
-                        className="aspect-video h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] md:aspect-auto"
-                      />
+                      {sanitizeUrl(latestCulte.coverImage) ? (
+                        <img
+                          src={sanitizeUrl(latestCulte.coverImage)}
+                          alt={latestCulte.title}
+                          className="aspect-video h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] md:aspect-auto"
+                        />
+                      ) : (
+                        <div className="flex aspect-video h-full min-h-[200px] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-church-navy to-church-blue/90 p-6 text-center text-white md:aspect-auto">
+                          <BookOpen className="h-9 w-9 text-white/75" aria-hidden="true" />
+                          {latestCulte.scriptureRef && (
+                            <span className="font-serif text-sm sm:text-base text-white/90">{latestCulte.scriptureRef}</span>
+                          )}
+                        </div>
+                      )}
                       {latestCulte.hasVideo && safeVideoUrl && (
                         <span className="absolute inset-0 flex items-center justify-center bg-church-navy/25 transition-colors group-hover:bg-church-navy/35">
                           <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-xs sm:text-sm font-semibold text-church-navy shadow-md">
@@ -334,98 +353,56 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </section>
       )}
 
-      {/* 4. Fenêtre Départements & Groupes */}
+      {/* 4. Fenêtre Départements principaux (ECODIM, AOC, HAC uniquement sur l'accueil) */}
       {sections.showDepartments && departments.length > 0 && (
         <section className="page space-y-4">
-          <SectionHead title="Départements & Groupes" linkLabel="Tous les départements" onLink={() => onNavigate('departements')} />
+          <SectionHead title="Départements" linkLabel="Tous les départements" onLink={() => onNavigate('departements')} />
           {(() => {
-            const priorityIds = ['ecodim', 'aoc', 'hac', 'jadci'];
-            const byPriority = [
-              ...priorityIds.map((id) => departments.find((d) => d.id === id)).filter((d): d is DepartmentItem => Boolean(d)),
-              ...departments.filter((d) => !priorityIds.includes(d.id))
-            ];
-            const primaryFour = byPriority.slice(0, 4);
-            const secondaryDepts = byPriority.slice(4, 8);
+            const mainIds = ['ecodim', 'aoc', 'hac'];
+            const mainThree = mainIds
+              .map((id) => departments.find((d) => d.id === id))
+              .filter((d): d is DepartmentItem => Boolean(d));
+            const displayed = mainThree.length > 0 ? mainThree : departments.slice(0, 3);
             return (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {primaryFour.map((dept) => {
-                    const logo = sanitizeUrl(dept.logoUrl);
-                    const cover = sanitizeUrl(dept.coverImage) || HERO_IMAGE;
-                    return (
-                      <button
-                        key={dept.id}
-                        onClick={() => onSelectDepartment(dept)}
-                        className="surface surface-interactive group flex w-full flex-col justify-between gap-3 p-4 text-left"
-                      >
-                        <div className="flex items-center gap-3.5">
-                          {logo ? (
-                            <img
-                              src={logo}
-                              alt={`Logo ${dept.name}`}
-                              className="h-16 w-16 shrink-0 rounded-xl border border-church-line bg-white object-contain p-1"
-                            />
-                          ) : (
-                            <img
-                              src={cover}
-                              alt={dept.name}
-                              className="h-16 w-16 shrink-0 rounded-xl object-cover bg-church-navy"
-                            />
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <span className="text-[11px] font-semibold uppercase tracking-wide text-church-blue">
-                              {dept.code}
-                            </span>
-                            <h3 className="font-serif text-base sm:text-lg font-semibold leading-snug text-church-navy group-hover:text-church-blue">
-                              {dept.name}
-                            </h3>
-                          </div>
-                        </div>
-                        <div className="flex items-end justify-between gap-2">
-                          <p className="line-clamp-2 text-xs text-church-muted leading-relaxed">
-                            {dept.tagline || dept.meetingSchedule || dept.description}
-                          </p>
-                          <ChevronRight className="h-4 w-4 shrink-0 text-church-blue transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {secondaryDepts.length > 0 && (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {secondaryDepts.map((dept) => {
-                      const logo = sanitizeUrl(dept.logoUrl);
-                      const cover = sanitizeUrl(dept.coverImage) || HERO_IMAGE;
-                      return (
-                        <button
-                          key={dept.id}
-                          onClick={() => onSelectDepartment(dept)}
-                          className="surface surface-interactive group flex w-full items-center gap-3 p-3 text-left"
-                        >
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {displayed.map((dept) => {
+                  const logo = sanitizeUrl(dept.logoUrl);
+                  return (
+                    <button
+                      key={dept.id}
+                      onClick={() => onSelectDepartment(dept)}
+                      className="surface surface-interactive group flex w-full flex-col justify-between gap-3 p-4 text-left"
+                    >
+                      <div className="flex items-center gap-3.5">
+                        {logo ? (
                           <img
-                            src={logo || cover}
-                            alt={dept.name}
-                            className={`h-12 w-12 shrink-0 rounded-xl ${
-                              logo ? 'border border-church-line bg-white object-contain p-1' : 'object-cover bg-church-navy'
-                            }`}
+                            src={logo}
+                            alt={`Logo ${dept.name}`}
+                            className="h-16 w-16 shrink-0 rounded-xl border border-church-line bg-white object-contain p-1"
                           />
-                          <div className="min-w-0 flex-1">
-                            <h4 className="font-serif text-sm font-semibold text-church-navy line-clamp-1 group-hover:text-church-blue">
-                              {dept.name}
-                            </h4>
-                            {(dept.meetingSchedule || dept.description) && (
-                              <p className="mt-0.5 line-clamp-1 text-xs text-church-muted">
-                                {dept.meetingSchedule || dept.description}
-                              </p>
-                            )}
-                          </div>
-                          <ChevronRight className="h-4 w-4 shrink-0 text-church-muted" aria-hidden="true" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                        ) : (
+                          <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-church-line bg-church-tint font-serif text-sm font-bold uppercase tracking-wide text-church-navy">
+                            {(dept.code || dept.name).slice(0, 6)}
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[11px] font-semibold uppercase tracking-wide text-church-blue">
+                            {dept.code}
+                          </span>
+                          <h3 className="font-serif text-base sm:text-lg font-semibold leading-snug text-church-navy group-hover:text-church-blue">
+                            {dept.name}
+                          </h3>
+                        </div>
+                      </div>
+                      <div className="flex items-end justify-between gap-2">
+                        <p className="line-clamp-2 text-xs text-church-muted leading-relaxed">
+                          {dept.tagline || dept.meetingSchedule || dept.description}
+                        </p>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-church-blue transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             );
           })()}
@@ -536,11 +513,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 className="surface surface-interactive group block w-full overflow-hidden text-left"
               >
                 <span className="relative block overflow-hidden bg-church-navy">
-                  <img
-                    src={sanitizeUrl(alb.coverImage) || HERO_IMAGE}
-                    alt={alb.title}
-                    className="aspect-[16/10] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03] sm:aspect-[4/3]"
-                  />
+                  {sanitizeUrl(alb.coverImage) ? (
+                    <img
+                      src={sanitizeUrl(alb.coverImage)}
+                      alt={alb.title}
+                      className="aspect-[16/10] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03] sm:aspect-[4/3]"
+                    />
+                  ) : (
+                    <span className="flex aspect-[16/10] w-full items-center justify-center bg-gradient-to-br from-church-navy to-church-blue/90 sm:aspect-[4/3]">
+                      <Images className="h-9 w-9 text-white/75" aria-hidden="true" />
+                    </span>
+                  )}
                   <span className="absolute bottom-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-0.5 text-xs font-semibold text-church-navy shadow-xs">
                     <Images className="h-3.5 w-3.5 text-church-blue" aria-hidden="true" />
                     {alb.items?.length || alb.mediaCount || 0}
