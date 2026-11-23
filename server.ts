@@ -5,15 +5,15 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { createRequire } from 'node:module';
 import dotenv from 'dotenv';
-import type webPushType from 'web-push';
+import * as webpush from 'web-push';
 
-const require = createRequire(import.meta.url);
-const webpush = require('web-push') as typeof webPushType;
-let bundledFirebaseConfig: { projectId?: string; apiKey?: string } = {};
+let bundledFirebaseConfig: { projectId?: string; apiKey?: string; firestoreDatabaseId?: string } = {};
 try {
-  bundledFirebaseConfig = require('./firebase-applet-config.json');
+  const cfgPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(cfgPath)) {
+    bundledFirebaseConfig = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  }
 } catch {
   bundledFirebaseConfig = {};
 }
@@ -436,14 +436,18 @@ const createDefaultStore = (): StoreData => ({
   driveFolders: []
 });
 
-const deriveVapidKeys = (): { publicKey: string; privateKey: string } => {
-  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    return {
-      publicKey: process.env.VAPID_PUBLIC_KEY.trim(),
-      privateKey: process.env.VAPID_PRIVATE_KEY.trim()
-    };
+const cleanEnvSecret = (raw?: string): string => {
+  if (!raw) return '';
+  return raw.trim().replace(/^["']|["']$/g, '').trim();
+};
+
+const deriveVapidKeys = (forceDeterministic = false): { publicKey: string; privateKey: string } => {
+  const envPub = cleanEnvSecret(process.env.VAPID_PUBLIC_KEY);
+  const envPriv = cleanEnvSecret(process.env.VAPID_PRIVATE_KEY);
+  if (!forceDeterministic && envPub && envPriv) {
+    return { publicKey: envPub, privateKey: envPriv };
   }
-  if (IS_VERCEL) {
+  if (IS_VERCEL || forceDeterministic) {
     const seed = crypto
       .createHash('sha256')
       .update(`${bundledFirebaseConfig?.projectId || 'eeadci'}:${bundledFirebaseConfig?.apiKey || 'anyama'}:vapid-v1`)
@@ -651,21 +655,35 @@ const saveStore = (data: StoreData): void => {
 
 let store: StoreData = loadStore();
 
-if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-  store.vapidKeys = {
-    publicKey: process.env.VAPID_PUBLIC_KEY.trim(),
-    privateKey: process.env.VAPID_PRIVATE_KEY.trim()
-  };
-} else if (IS_VERCEL || !store.vapidKeys?.publicKey || !store.vapidKeys?.privateKey) {
-  store.vapidKeys = deriveVapidKeys();
-  saveStore(store);
-}
+const ensureVapidConfigured = () => {
+  const envPub = cleanEnvSecret(process.env.VAPID_PUBLIC_KEY);
+  const envPriv = cleanEnvSecret(process.env.VAPID_PRIVATE_KEY);
+  if (envPub && envPriv) {
+    store.vapidKeys = { publicKey: envPub, privateKey: envPriv };
+  } else if (IS_VERCEL || !store.vapidKeys?.publicKey || !store.vapidKeys?.privateKey) {
+    store.vapidKeys = deriveVapidKeys();
+    saveStore(store);
+  }
 
-webpush.setVapidDetails(
-  'mailto:contact@eeadci-anyama.local',
-  store.vapidKeys.publicKey,
-  store.vapidKeys.privateKey
-);
+  try {
+    webpush.setVapidDetails(
+      'mailto:contact@eeadci-anyama.org',
+      store.vapidKeys.publicKey,
+      store.vapidKeys.privateKey
+    );
+  } catch (err) {
+    console.warn('Clés VAPID invalides détectées, repli automatique sur les clés générées:', err);
+    store.vapidKeys = deriveVapidKeys(true);
+    saveStore(store);
+    webpush.setVapidDetails(
+      'mailto:contact@eeadci-anyama.org',
+      store.vapidKeys.publicKey,
+      store.vapidKeys.privateKey
+    );
+  }
+};
+
+ensureVapidConfigured();
 
 const appendSecurityLog = (event: string, actor: string, detail: string, severity: 'info' | 'warning' | 'alert' = 'info') => {
   const entry: SecurityLog = {
@@ -718,15 +736,29 @@ const verifyPassword = (password: string, storedHash: string, salt: string): boo
   }
 };
 
-const signToken = (adminId: string, ttlMinutes: number): string => {
+const signToken = (
+  admin: Pick<StoredAdmin, 'id' | 'identifier' | 'name' | 'role'>,
+  ttlMinutes: number
+): string => {
   const exp = Date.now() + ttlMinutes * 60 * 1000;
   const nonce = crypto.randomBytes(12).toString('hex');
-  const payload = Buffer.from(JSON.stringify({ adminId, exp, nonce })).toString('base64url');
+  const payload = Buffer.from(
+    JSON.stringify({
+      adminId: admin.id,
+      email: admin.identifier,
+      name: admin.name,
+      role: admin.role,
+      exp,
+      nonce
+    })
+  ).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 };
 
-const verifyToken = (token: string): { adminId: string; exp: number } | null => {
+const verifyToken = (
+  token: string
+): { adminId: string; email?: string; name?: string; role?: string; exp: number } | null => {
   if (!token || !token.includes('.')) return null;
   const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
@@ -737,7 +769,13 @@ const verifyToken = (token: string): { adminId: string; exp: number } | null => 
     return null;
   }
   try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { adminId: string; exp: number };
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      adminId: string;
+      email?: string;
+      name?: string;
+      role?: string;
+      exp: number;
+    };
     if (!parsed.adminId || !parsed.exp || Date.now() > parsed.exp) return null;
     return parsed;
   } catch {
@@ -901,6 +939,79 @@ const clearSessionCookie = (res: Response) => {
   } as any);
 };
 
+const checkAuthorizedEmailInFirestoreRest = async (
+  emailLower: string,
+  firebaseIdToken: string
+): Promise<{ authorized: boolean; name?: string; role?: string }> => {
+  const projectId = bundledFirebaseConfig?.projectId;
+  const databaseId = bundledFirebaseConfig?.firestoreDatabaseId || '(default)';
+  if (!projectId || !emailLower || !firebaseIdToken) return { authorized: false };
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/authorized_emails/${encodeURIComponent(emailLower)}`;
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${firebaseIdToken}` }
+    });
+    if (!r.ok) return { authorized: false };
+    const docJson = (await r.json().catch(() => ({}))) as {
+      fields?: { name?: { stringValue?: string }; role?: { stringValue?: string } };
+    };
+    return {
+      authorized: true,
+      name: docJson?.fields?.name?.stringValue,
+      role: docJson?.fields?.role?.stringValue
+    };
+  } catch {
+    return { authorized: false };
+  }
+};
+
+const verifyFirebaseAdminIdToken = async (
+  firebaseIdToken: string
+): Promise<{ email: string; displayName: string; role: string } | null> => {
+  const apiKey = getFirebaseApiKey();
+  if (!firebaseIdToken || !apiKey) return null;
+  try {
+    const lookupRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: firebaseIdToken })
+      }
+    );
+    const lookupData = (await lookupRes.json().catch(() => ({}))) as {
+      users?: Array<{ email?: string; emailVerified?: boolean; displayName?: string }>;
+    };
+    const googleUser = lookupData?.users?.[0];
+    const verifiedEmail = googleUser?.email?.toLowerCase() || '';
+    if (!lookupRes.ok || !googleUser?.emailVerified || !verifiedEmail) {
+      return null;
+    }
+
+    const seed = DEFAULT_AUTHORIZED_ADMIN_EMAILS.find((e) => e.email.toLowerCase() === verifiedEmail);
+    const localInvite = (store.invitedAdmins || []).find((i) => i.email.toLowerCase() === verifiedEmail);
+    if (seed || localInvite) {
+      return {
+        email: verifiedEmail,
+        displayName: googleUser.displayName || localInvite?.name || seed?.name || verifiedEmail.split('@')[0],
+        role: localInvite?.role || seed?.role || 'Administrateur'
+      };
+    }
+
+    const remoteCheck = await checkAuthorizedEmailInFirestoreRest(verifiedEmail, firebaseIdToken);
+    if (remoteCheck.authorized) {
+      return {
+        email: verifiedEmail,
+        displayName: googleUser.displayName || remoteCheck.name || verifiedEmail.split('@')[0],
+        role: remoteCheck.role || 'Administrateur'
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 const getAuthenticatedAdmin = (req: Request): StoredAdmin | null => {
   const cookies = parseCookies(req);
   const authHeader = req.headers.authorization;
@@ -908,15 +1019,45 @@ const getAuthenticatedAdmin = (req: Request): StoredAdmin | null => {
   const token = bearer || cookies['eeadci_admin_session'] || '';
   const parsed = verifyToken(token);
   if (!parsed) return null;
-  return store.admins.find((a) => a.id === parsed.adminId) || null;
+  const existing = store.admins.find((a) => a.id === parsed.adminId);
+  if (existing) return existing;
+  if (parsed.email) {
+    return {
+      id: parsed.adminId,
+      name: parsed.name || parsed.email.split('@')[0],
+      identifier: parsed.email,
+      role: parsed.role || 'Administrateur',
+      passwordHash: '',
+      salt: '',
+      createdAt: new Date().toISOString()
+    };
+  }
+  return null;
 };
 
 interface AuthedRequest extends Request {
   adminUser?: StoredAdmin;
 }
 
-const requireAdmin = (req: AuthedRequest, res: Response, next: NextFunction) => {
-  const admin = getAuthenticatedAdmin(req);
+const requireAdmin = async (req: AuthedRequest, res: Response, next: NextFunction) => {
+  let admin = getAuthenticatedAdmin(req);
+  if (!admin) {
+    const fbToken = String(req.headers['x-firebase-id-token'] || '').trim();
+    if (fbToken) {
+      const verified = await verifyFirebaseAdminIdToken(fbToken);
+      if (verified) {
+        admin = {
+          id: `adm-fb-${crypto.createHash('sha256').update(verified.email).digest('hex').slice(0, 12)}`,
+          name: verified.displayName,
+          identifier: verified.email,
+          role: verified.role,
+          passwordHash: '',
+          salt: '',
+          createdAt: new Date().toISOString()
+        };
+      }
+    }
+  }
   if (!admin) {
     res.status(401).json({ error: 'Authentification administrateur requise.' });
     return;
@@ -1255,40 +1396,58 @@ app.post('/api/public/albums/:id/view', (req, res) => {
 
 // Abonnements Web Push PWA (sans compte utilisateur)
 app.get('/api/public/push/vapid-key', (_req, res) => {
-  res.json({ publicKey: store.vapidKeys?.publicKey || '' });
+  try {
+    if (!store.vapidKeys?.publicKey) {
+      ensureVapidConfigured();
+    }
+    res.json({ publicKey: store.vapidKeys?.publicKey || '' });
+  } catch (err) {
+    console.error('Erreur VAPID key:', err);
+    res.status(500).json({ error: 'Clé Push serveur indisponible.' });
+  }
 });
 
 app.post('/api/public/push/subscribe', (req, res) => {
-  const sub = req.body?.subscription;
-  if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
-    res.status(400).json({ error: 'Abonnement Push invalide.' });
-    return;
-  }
-  const existing = store.pushSubscriptions || [];
-  const filtered = existing.filter((s) => s.endpoint !== sub.endpoint);
-  store.pushSubscriptions = [
-    ...filtered,
-    {
-      endpoint: String(sub.endpoint),
-      expirationTime: sub.expirationTime ?? null,
-      keys: {
-        p256dh: String(sub.keys.p256dh),
-        auth: String(sub.keys.auth)
-      },
-      createdAt: new Date().toISOString()
+  try {
+    const sub = req.body?.subscription;
+    if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+      res.status(400).json({ error: 'Abonnement Push invalide.' });
+      return;
     }
-  ];
-  saveStore(store);
-  res.json({ ok: true, count: store.pushSubscriptions.length });
+    const existing = store.pushSubscriptions || [];
+    const filtered = existing.filter((s) => s.endpoint !== sub.endpoint);
+    store.pushSubscriptions = [
+      ...filtered,
+      {
+        endpoint: String(sub.endpoint),
+        expirationTime: sub.expirationTime ?? null,
+        keys: {
+          p256dh: String(sub.keys.p256dh),
+          auth: String(sub.keys.auth)
+        },
+        createdAt: new Date().toISOString()
+      }
+    ];
+    saveStore(store);
+    res.json({ ok: true, count: store.pushSubscriptions.length });
+  } catch (err) {
+    console.error('Erreur inscription Push:', err);
+    res.status(500).json({ error: 'Impossible d’enregistrer cet appareil pour les notifications.' });
+  }
 });
 
 app.post('/api/public/push/unsubscribe', (req, res) => {
-  const endpoint = String(req.body?.endpoint || '');
-  if (endpoint) {
-    store.pushSubscriptions = (store.pushSubscriptions || []).filter((s) => s.endpoint !== endpoint);
-    saveStore(store);
+  try {
+    const endpoint = String(req.body?.endpoint || '');
+    if (endpoint) {
+      store.pushSubscriptions = (store.pushSubscriptions || []).filter((s) => s.endpoint !== endpoint);
+      saveStore(store);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Erreur désinscription Push:', err);
+    res.status(500).json({ error: 'Impossible de désactiver les notifications.' });
   }
-  res.json({ ok: true });
 });
 
 // =====================================================================
@@ -1355,7 +1514,26 @@ app.post('/api/auth/google', async (req, res) => {
       return;
     }
 
-    const invite = (store.invitedAdmins || []).find((i) => i.email.toLowerCase() === verifiedEmail);
+    let invite = (store.invitedAdmins || []).find((i) => i.email.toLowerCase() === verifiedEmail);
+    if (!invite) {
+      const seedMatch = DEFAULT_AUTHORIZED_ADMIN_EMAILS.find((e) => e.email.toLowerCase() === verifiedEmail);
+      const remoteCheck = seedMatch
+        ? { authorized: true, name: seedMatch.name, role: seedMatch.role }
+        : await checkAuthorizedEmailInFirestoreRest(verifiedEmail, firebaseIdToken);
+
+      if (remoteCheck.authorized) {
+        invite = {
+          email: verifiedEmail,
+          name: googleUser.displayName || remoteCheck.name || verifiedEmail.split('@')[0],
+          role: remoteCheck.role || 'Administrateur',
+          status: 'active',
+          invitedBy: 'Système',
+          invitedAt: new Date().toISOString()
+        };
+        store.invitedAdmins = [...(store.invitedAdmins || []), invite];
+      }
+    }
+
     if (!invite) {
       appendSecurityLog(
         'Accès Google refusé',
@@ -1400,7 +1578,7 @@ app.post('/api/auth/google', async (req, res) => {
     appendSecurityLog('Connexion Google réussie', admin.name, `Accès administrateur (${verifiedEmail}).`, 'info');
     saveStore(store);
 
-    const token = signToken(admin.id, store.security.sessionTimeoutMinutes || 120);
+    const token = signToken(admin, store.security.sessionTimeoutMinutes || 120);
     setSessionCookie(res, token, store.security.sessionTimeoutMinutes || 120);
     res.json({ token, admin: toPublicAdmin(admin) });
   } catch {
@@ -1445,7 +1623,7 @@ app.post('/api/auth/login', (req, res) => {
   found.lastLoginAt = new Date().toISOString();
   appendSecurityLog('Connexion réussie', found.name, `Session ouverte (${found.identifier})`, 'info');
 
-  const token = signToken(found.id, store.security.sessionTimeoutMinutes || 120);
+  const token = signToken(found, store.security.sessionTimeoutMinutes || 120);
   setSessionCookie(res, token, store.security.sessionTimeoutMinutes || 120);
   res.json({ token, admin: toPublicAdmin(found) });
 });
@@ -1539,7 +1717,7 @@ app.post('/api/auth/reset-password', (req, res) => {
   }
   appendSecurityLog('Mot de passe réinitialisé', admin.name, `Réinitialisation validée (${email}).`, 'info');
 
-  const token = signToken(admin.id, store.security.sessionTimeoutMinutes || 120);
+  const token = signToken(admin, store.security.sessionTimeoutMinutes || 120);
   setSessionCookie(res, token, store.security.sessionTimeoutMinutes || 120);
   res.json({ token, admin: toPublicAdmin(admin), recoveryCode: nextRecoveryCode });
 });
@@ -1622,7 +1800,7 @@ app.post('/api/auth/reset-password-google', async (req, res) => {
     invite.registeredAt = invite.registeredAt || new Date().toISOString();
     appendSecurityLog('Réinitialisation via Google', admin.name, `Accès vérifié par Google (${verifiedEmail}).`, 'info');
 
-    const token = signToken(admin.id, store.security.sessionTimeoutMinutes || 120);
+    const token = signToken(admin, store.security.sessionTimeoutMinutes || 120);
     setSessionCookie(res, token, store.security.sessionTimeoutMinutes || 120);
     res.json({ token, admin: toPublicAdmin(admin), recoveryCode: nextRecoveryCode });
   } catch {
@@ -1668,54 +1846,89 @@ app.get('/api/admin/bootstrap', requireAdmin, (_req, res) => {
 
 // Envoi réel de notifications Push PWA à tous les abonnés
 app.post('/api/admin/push/send', requireAdmin, async (req: AuthedRequest, res: Response) => {
-  const title = sanitizeText(req.body?.title, 100) || 'Assemblées de Dieu d’Anyama';
-  const body = sanitizeText(req.body?.body, 280);
-  const url = sanitizeText(req.body?.url, 200) || '/';
+  try {
+    ensureVapidConfigured();
+    const title = sanitizeText(req.body?.title, 100) || 'Assemblées de Dieu d’Anyama';
+    const body = sanitizeText(req.body?.body, 280);
+    const url = sanitizeText(req.body?.url, 200) || '/';
 
-  if (!body) {
-    res.status(400).json({ error: 'Le message de la notification est requis.' });
-    return;
-  }
+    if (!body) {
+      res.status(400).json({ error: 'Le message de la notification est requis.' });
+      return;
+    }
 
-  const subs = store.pushSubscriptions || [];
-  const payload = JSON.stringify({ title, body, url, tag: `eeadci-${Date.now()}` });
+    const incomingSubs: Array<{
+      endpoint: string;
+      expirationTime?: number | null;
+      keys: { p256dh: string; auth: string };
+      createdAt?: string;
+    }> = Array.isArray(req.body?.subscriptions) ? req.body.subscriptions : [];
 
-  let sentCount = 0;
-  let failedCount = 0;
-  const validSubs: NonNullable<StoreData['pushSubscriptions']> = [];
-
-  for (const sub of subs) {
-    try {
-      await webpush.sendNotification(sub, payload);
-      sentCount += 1;
-      validSubs.push(sub);
-    } catch (err: any) {
-      failedCount += 1;
-      // Garder uniquement si l'erreur n'est pas un désabonnement définitif (404 / 410)
-      if (err?.statusCode !== 404 && err?.statusCode !== 410) {
-        validSubs.push(sub);
+    const byEndpoint = new Map<string, NonNullable<StoreData['pushSubscriptions']>[number]>();
+    for (const s of store.pushSubscriptions || []) {
+      if (s?.endpoint && s?.keys?.p256dh && s?.keys?.auth) {
+        byEndpoint.set(s.endpoint, s);
       }
     }
+    for (const s of incomingSubs) {
+      if (s?.endpoint && s?.keys?.p256dh && s?.keys?.auth && /^https:\/\//i.test(s.endpoint)) {
+        byEndpoint.set(s.endpoint, {
+          endpoint: String(s.endpoint),
+          expirationTime: s.expirationTime ?? null,
+          keys: { p256dh: String(s.keys.p256dh), auth: String(s.keys.auth) },
+          createdAt: s.createdAt || new Date().toISOString()
+        });
+      }
+    }
+
+    const subs = Array.from(byEndpoint.values());
+    const payload = JSON.stringify({ title, body, url, tag: `eeadci-${Date.now()}` });
+
+    let sentCount = 0;
+    let failedCount = 0;
+    const validSubs: NonNullable<StoreData['pushSubscriptions']> = [];
+    const expiredEndpoints: string[] = [];
+
+    for (const sub of subs) {
+      try {
+        await webpush.sendNotification(sub, payload);
+        sentCount += 1;
+        validSubs.push(sub);
+      } catch (err: any) {
+        failedCount += 1;
+        if (err?.statusCode === 404 || err?.statusCode === 410) {
+          expiredEndpoints.push(sub.endpoint);
+        } else {
+          validSubs.push(sub);
+        }
+      }
+    }
+
+    store.pushSubscriptions = validSubs;
+    const entry = {
+      id: `push-${Date.now()}`,
+      title,
+      body,
+      url,
+      sentAt: new Date().toISOString(),
+      recipientCount: sentCount
+    };
+    store.pushHistory = [entry, ...(store.pushHistory || [])].slice(0, 30);
+    appendSecurityLog('Notification Push PWA envoyée', req.adminUser!.name, `${title} (${sentCount} appareil(s))`, 'info');
+    saveStore(store);
+
+    res.json({
+      sentCount,
+      failedCount,
+      expiredEndpoints,
+      subscribersCount: validSubs.length,
+      entry,
+      pushHistory: store.pushHistory
+    });
+  } catch (err) {
+    console.error('Erreur envoi Push:', err);
+    res.status(500).json({ error: 'Erreur lors de l’envoi des notifications Push.' });
   }
-
-  store.pushSubscriptions = validSubs;
-  const entry = {
-    id: `push-${Date.now()}`,
-    title,
-    body,
-    url,
-    sentAt: new Date().toISOString(),
-    recipientCount: sentCount
-  };
-  store.pushHistory = [entry, ...(store.pushHistory || [])].slice(0, 30);
-  appendSecurityLog('Notification Push PWA envoyée', req.adminUser!.name, `${title} (${sentCount} appareil(s))`, 'info');
-
-  res.json({
-    sentCount,
-    failedCount,
-    subscribersCount: validSubs.length,
-    pushHistory: store.pushHistory
-  });
 });
 
 // Upload sécurisé multi-format (images, lots de photos, PDF, Word, PowerPoint, Excel, audio, vidéo)
@@ -1833,10 +2046,10 @@ app.post(
     const safeFileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${finalExt}`;
     fs.writeFileSync(path.join(UPLOADS_DIR, safeFileName), finalBuffer);
 
-    // Sur Vercel (/tmp éphémère), encoder directement les images raster <= 1,8 Mo en data URL pour garantir l'affichage permanent
+    // Encoder les images raster compactes en data URL pour persistance universelle dans Firestore (local & Vercel)
     const inlineRasterMime = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(finalMime);
     const resolvedUrl =
-      IS_VERCEL && docType === 'image' && inlineRasterMime && finalBuffer.length <= 1.8 * 1024 * 1024
+      docType === 'image' && inlineRasterMime && finalBuffer.length <= 1.2 * 1024 * 1024
         ? `data:${finalMime};base64,${finalBuffer.toString('base64')}`
         : `/uploads/${safeFileName}`;
 
@@ -2354,16 +2567,16 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
       const safeFileName = `drive-${Date.now()}-${crypto.randomBytes(5).toString('hex')}${cls.ext}`;
       fs.writeFileSync(path.join(UPLOADS_DIR, safeFileName), buf);
 
-      let resolvedMediaUrl = `/uploads/${safeFileName}`;
+      let resolvedMediaUrl = IS_VERCEL && cls.kind !== 'photo' ? drivePreviewUrl : `/uploads/${safeFileName}`;
 
-      // Sur Vercel (/tmp éphémère), garantir un affichage permanent des photos importées
-      if (IS_VERCEL && cls.kind === 'photo') {
+      // Garantir un affichage permanent des photos importées (data URL si <= 1,8 Mo ou miniature HD Drive)
+      if (cls.kind === 'photo') {
         const inlineAllowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(cls.finalMime);
         if (inlineAllowed && buf.length <= 1.8 * 1024 * 1024) {
           resolvedMediaUrl = `data:${cls.finalMime};base64,${buf.toString('base64')}`;
         } else if (df.thumbnailLink && /^https:\/\//i.test(df.thumbnailLink)) {
           try {
-            const hiResThumb = df.thumbnailLink.replace(/=s\d+.*$/, '=s1600');
+            const hiResThumb = df.thumbnailLink.replace(/=s\d+.*$/, '=s1200');
             const thumbRes = await fetch(hiResThumb, {
               headers: { Authorization: `Bearer ${driveToken}` }
             });
@@ -2374,7 +2587,7 @@ app.post('/api/admin/drive/import', requireAdmin, async (req: AuthedRequest, res
               }
             }
           } catch {
-            // conserver /uploads/... en dernier recours
+            // conserver /uploads/... ou miniature si disponible
           }
         }
       }
@@ -2741,6 +2954,15 @@ app.get('/api/admin/backup', requireAdmin, (req: AuthedRequest, res: Response) =
   });
 });
 
+// Gestionnaire global d'erreurs API JSON
+app.use('/api', (err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('Erreur API non gérée:', err);
+  if (res.headersSent) return;
+  res.status(err?.status || 500).json({
+    error: err?.message || 'Erreur interne du serveur.'
+  });
+});
+
 // Planificateur automatique toutes les 60 secondes (serveur persistant hors Vercel)
 if (!IS_VERCEL) {
   setInterval(() => {
@@ -2759,7 +2981,8 @@ async function startServer() {
       res.sendFile(path.join(distDir, 'index.html'));
     });
   } else {
-    const { createServer: createViteServer } = await import('vite');
+    const vitePkg = 'vite';
+    const { createServer: createViteServer } = await import(vitePkg);
     const vite = await createViteServer({
       server: {
         middlewareMode: true,

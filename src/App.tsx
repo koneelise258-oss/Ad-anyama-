@@ -31,7 +31,7 @@ import {
   DEFAULT_CHURCH_SETTINGS
 } from './mockData';
 import { api, setSessionToken } from './services/api';
-import { clearDriveSession, consumeGoogleRedirectResult } from './services/googleDrive';
+import { clearDriveSession, consumeGoogleRedirectResult, formatFirebaseGoogleError } from './services/googleDrive';
 import { Header } from './components/Header';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { HomeView } from './components/HomeView';
@@ -261,8 +261,7 @@ export default function App() {
         }
       } catch (err) {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : 'Erreur lors de la connexion Google.';
-        setAuthRedirectError(msg);
+        setAuthRedirectError(formatFirebaseGoogleError(err).message);
         setActivePage('admin');
       }
     })();

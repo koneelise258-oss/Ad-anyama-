@@ -1,0 +1,336 @@
+{
+  "entities": {
+    "TestConnection": {
+      "title": "TestConnection",
+      "description": "Document de vérification de connexion Firestore au démarrage.",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["ok"]
+    },
+    "ChurchSettingsDoc": {
+      "title": "ChurchSettingsDoc",
+      "description": "Paramètres généraux de l'église, thème, sections d'accueil et horaires hebdomadaires.",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": ["string", "null"] },
+        "denomination": { "type": "string" },
+        "parishName": { "type": "string" },
+        "annexLabel": { "type": "string" },
+        "motherChurch": { "type": "string" },
+        "principalPastor": { "type": "string" },
+        "foundationSummary": { "type": "string" },
+        "city": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "footerNote": { "type": "string" },
+        "announcementBanner": { "type": "object" },
+        "schedules": { "type": "array" },
+        "theme": { "type": "object" },
+        "homeSections": { "type": "object" }
+      },
+      "required": ["denomination", "parishName", "schedules"]
+    },
+    "HeroContentDoc": {
+      "title": "HeroContentDoc",
+      "description": "Textes et boutons de la section d'accueil (Hero).",
+      "type": "object",
+      "properties": {
+        "nationalBadge": { "type": "string" },
+        "locationBadge": { "type": "string" },
+        "mainTitle": { "type": "string" },
+        "welcomeMessage": { "type": "string" },
+        "actionButtonCulte": { "type": "string" },
+        "actionButtonEvents": { "type": "string" }
+      },
+      "required": ["mainTitle", "welcomeMessage"]
+    },
+    "SiteImagesDoc": {
+      "title": "SiteImagesDoc",
+      "description": "Images principales du site configurables depuis l'espace administrateur.",
+      "type": "object",
+      "properties": {
+        "heroImage": { "type": "string" },
+        "pastorImage": { "type": "string" },
+        "choirImage": { "type": "string" },
+        "youthImage": { "type": "string" }
+      }
+    },
+    "PublicMetaDoc": {
+      "title": "PublicMetaDoc",
+      "description": "Métadonnées publiques non sensibles (empreinte SHA-256 du portail caché et état d'initialisation).",
+      "type": "object",
+      "properties": {
+        "seeded": { "type": "boolean" },
+        "gateHash": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "SecurityConfigDoc": {
+      "title": "SecurityConfigDoc",
+      "description": "Configuration confidentielle de sécurité administrateur.",
+      "type": "object",
+      "properties": {
+        "secretGateSlug": { "type": "string" },
+        "enableKeyboardShortcut": { "type": "boolean" },
+        "enableFooterTap": { "type": "boolean" },
+        "sessionTimeoutMinutes": { "type": "number" }
+      },
+      "required": ["secretGateSlug", "sessionTimeoutMinutes"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Profil d'un administrateur authentifié par Google.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "identifier": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" }
+      },
+      "required": ["uid", "id", "name", "identifier", "role", "createdAt"]
+    },
+    "AuthorizedEmail": {
+      "title": "AuthorizedEmail",
+      "description": "Liste blanche des adresses Google autorisées pour l'administration.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "active"] },
+        "invitedBy": { "type": "string" },
+        "invitedAt": { "type": "string" },
+        "registeredAt": { "type": "string" }
+      },
+      "required": ["email", "name", "role", "status", "invitedAt"]
+    },
+    "SecurityLog": {
+      "title": "SecurityLog",
+      "description": "Journal immuable d'audit des actions d'administration et de sécurité.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "event": { "type": "string" },
+        "actor": { "type": "string" },
+        "detail": { "type": "string" },
+        "severity": { "type": "string", "enum": ["info", "warning", "alert"] }
+      },
+      "required": ["id", "timestamp", "event", "actor", "detail", "severity"]
+    },
+    "DriveAccount": {
+      "title": "DriveAccount",
+      "description": "Compte Google Drive relié à l'administration.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoLink": { "type": "string" },
+        "addedAt": { "type": "string" },
+        "lastSyncedAt": { "type": "string" }
+      },
+      "required": ["email", "displayName", "addedAt"]
+    },
+    "DriveFolder": {
+      "title": "DriveFolder",
+      "description": "Dossier Google Drive synchronisé avec un album du site.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "folderId": { "type": "string" },
+        "folderName": { "type": "string" },
+        "accountEmail": { "type": "string" },
+        "albumId": { "type": "string" },
+        "albumTitle": { "type": "string" },
+        "lastSyncedAt": { "type": "string" },
+        "photoCount": { "type": "number" }
+      },
+      "required": ["folderId", "folderName", "accountEmail", "albumId", "albumTitle", "lastSyncedAt"]
+    },
+    "PushSubscriptionDoc": {
+      "title": "PushSubscriptionDoc",
+      "description": "Abonnement Web Push d'un appareil visiteur (stockage sécurisé).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "expirationTime": { "type": ["number", "null"] },
+        "keys": { "type": "object" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "endpoint", "keys", "createdAt"]
+    },
+    "PushHistoryDoc": {
+      "title": "PushHistoryDoc",
+      "description": "Historique des notifications Push envoyées par l'administration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "url": { "type": "string" },
+        "sentAt": { "type": "string" },
+        "recipientCount": { "type": "number" }
+      },
+      "required": ["id", "title", "body", "url", "sentAt", "recipientCount"]
+    },
+    "CulteDoc": {
+      "title": "CulteDoc",
+      "description": "Culte ou prédication avec médias, documents, réactions et commentaires.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["publie", "programme", "brouillon"] },
+        "reactions": { "type": "object" },
+        "comments": { "type": "array" },
+        "viewsCount": { "type": "number" }
+      },
+      "required": ["id", "title", "date", "status"]
+    },
+    "EventDoc": {
+      "title": "EventDoc",
+      "description": "Événement d'église avec inscriptions, sondage, médias et commentaires.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "date": { "type": "string" },
+        "attendeesCount": { "type": "number" },
+        "likes": { "type": "number" },
+        "viewsCount": { "type": "number" },
+        "comments": { "type": "array" }
+      },
+      "required": ["id", "title", "category", "date"]
+    },
+    "NewsDoc": {
+      "title": "NewsDoc",
+      "description": "Actualité ou communiqué officiel de l'église.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "date": { "type": "string" },
+        "readsCount": { "type": "number" },
+        "likes": { "type": "number" },
+        "comments": { "type": "array" }
+      },
+      "required": ["id", "title", "category", "date"]
+    },
+    "AlbumDoc": {
+      "title": "AlbumDoc",
+      "description": "Album photo/vidéo de la galerie (les médias volumineux sont stockés dans la sous-collection items).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "type": { "type": "string", "enum": ["photo", "video", "mixte"] },
+        "date": { "type": "string" },
+        "mediaCount": { "type": "number" },
+        "viewsCount": { "type": "number" }
+      },
+      "required": ["id", "title", "category", "type", "date"]
+    },
+    "AlbumMediaItemDoc": {
+      "title": "AlbumMediaItemDoc",
+      "description": "Élément média individuel (photo/vidéo/audio) d'un album.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["photo", "video", "audio"] },
+        "url": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "type", "url"]
+    },
+    "DepartmentDoc": {
+      "title": "DepartmentDoc",
+      "description": "Département ou ministère de l'assemblée locale (ECODIM, AOC, HAC, etc.).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "code", "name"]
+    }
+  },
+  "firestore": {
+    "/test/{docId}": {
+      "schema": { "$ref": "#/entities/TestConnection" },
+      "description": "Point de vérification de connectivité Firestore."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/ChurchSettingsDoc" },
+      "description": "Paramètres publics du site (church, hero, siteImages, meta)."
+    },
+    "/security_config/{configId}": {
+      "schema": { "$ref": "#/entities/SecurityConfigDoc" },
+      "description": "Configuration confidentielle du portail d'administration."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Profils des administrateurs authentifiés."
+    },
+    "/authorized_emails/{emailKey}": {
+      "schema": { "$ref": "#/entities/AuthorizedEmail" },
+      "description": "Liste blanche des adresses e-mail Google autorisées."
+    },
+    "/security_logs/{logId}": {
+      "schema": { "$ref": "#/entities/SecurityLog" },
+      "description": "Journal immuable d'audit de sécurité."
+    },
+    "/drive_accounts/{emailKey}": {
+      "schema": { "$ref": "#/entities/DriveAccount" },
+      "description": "Comptes Google Drive reliés (accès admin uniquement)."
+    },
+    "/drive_folders/{folderKey}": {
+      "schema": { "$ref": "#/entities/DriveFolder" },
+      "description": "Dossiers Google Drive synchronisés (accès admin uniquement)."
+    },
+    "/push_subscriptions/{subId}": {
+      "schema": { "$ref": "#/entities/PushSubscriptionDoc" },
+      "description": "Abonnements Web Push des appareils (lecture admin uniquement)."
+    },
+    "/push_history/{historyId}": {
+      "schema": { "$ref": "#/entities/PushHistoryDoc" },
+      "description": "Historique des notifications Push envoyées."
+    },
+    "/cultes/{culteId}": {
+      "schema": { "$ref": "#/entities/CulteDoc" },
+      "description": "Cultes et prédications publiés ou programmés."
+    },
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/EventDoc" },
+      "description": "Événements et agenda de l'église."
+    },
+    "/news/{newsId}": {
+      "schema": { "$ref": "#/entities/NewsDoc" },
+      "description": "Actualités et communiqués officiels."
+    },
+    "/albums/{albumId}": {
+      "schema": { "$ref": "#/entities/AlbumDoc" },
+      "description": "Albums de la galerie photo et vidéo."
+    },
+    "/albums/{albumId}/items/{itemId}": {
+      "schema": { "$ref": "#/entities/AlbumMediaItemDoc" },
+      "description": "Médias individuels d'un album pour contourner la limite de 1 Mo par document."
+    },
+    "/departments/{deptId}": {
+      "schema": { "$ref": "#/entities/DepartmentDoc" },
+      "description": "Départements et ministères de l'assemblée."
+    }
+  }
+}

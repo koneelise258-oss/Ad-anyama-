@@ -774,9 +774,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const handleDownloadBackup = async () => {
     try {
-      const res = await fetch(api.downloadBackupUrl(), { credentials: 'include' });
-      if (!res.ok) throw new Error('Téléchargement refusé.');
-      const blob = await res.blob();
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        churchSettings,
+        heroContent,
+        siteImages,
+        cultes,
+        events,
+        news,
+        albums,
+        departments
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

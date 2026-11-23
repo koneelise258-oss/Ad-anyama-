@@ -12,7 +12,7 @@ interface MediaBatchUploaderProps {
   onUploadedDocuments?: (docs: CulteDocument[]) => void;
 }
 
-const MAX_RASTER_BYTES_DIRECT = 2.2 * 1024 * 1024;
+const MAX_RASTER_BYTES_DIRECT = 420 * 1024;
 
 const optimizeImageIfNeeded = async (file: File): Promise<File> => {
   const isRaster =
@@ -27,7 +27,7 @@ const optimizeImageIfNeeded = async (file: File): Promise<File> => {
     const img = new Image();
     img.onload = () => {
       try {
-        const maxDim = 1800;
+        const maxDim = 1280;
         let width = img.naturalWidth || img.width;
         let height = img.naturalHeight || img.height;
         if (width > maxDim || height > maxDim) {
@@ -45,7 +45,7 @@ const optimizeImageIfNeeded = async (file: File): Promise<File> => {
           return;
         }
         ctx.drawImage(img, 0, 0, width, height);
-        const outMime = file.type === 'image/png' && file.size < 3 * 1024 * 1024 ? 'image/png' : 'image/jpeg';
+        const outMime = file.type === 'image/png' && file.size < 450 * 1024 ? 'image/png' : 'image/jpeg';
         canvas.toBlob(
           (blob) => {
             URL.revokeObjectURL(objectUrl);
@@ -58,7 +58,7 @@ const optimizeImageIfNeeded = async (file: File): Promise<File> => {
             resolve(new File([blob], `${base}${ext}`, { type: outMime }));
           },
           outMime,
-          0.86
+          0.8
         );
       } catch {
         URL.revokeObjectURL(objectUrl);

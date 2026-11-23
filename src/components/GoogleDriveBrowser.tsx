@@ -3,6 +3,7 @@ import type { AlbumItem, CulteDocument, LinkedDriveAccount, LinkedDriveFolder, M
 import {
   clearDriveSession,
   connectGoogleDriveAccount,
+  formatFirebaseGoogleError,
   getCachedDriveSessions,
   getDriveSessionToken,
   isInsideIframe,
@@ -215,22 +216,11 @@ export const GoogleDriveBrowser: React.FC<GoogleDriveBrowserProps> = ({
         }
       }
 
-      const rawMsg = String(err?.message || '');
-      const code = String(err?.code || '');
-      let message = 'Connexion Google Drive annulée ou impossible.';
-      if (code === 'auth/unauthorized-domain') {
-        const host = typeof window !== 'undefined' ? window.location.hostname : '';
-        message = `Domaine non autorisé dans Firebase Auth (${host}).`;
-      } else if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-        message = inIframe
-          ? 'Fenêtre Google bloquée dans l’aperçu intégré : ouvrez l’application dans un nouvel onglet pour relier Google Drive, puis cochez bien la case d’autorisation Google Drive.'
-          : 'Connexion interrompue ou bloquée : ajoutez votre Gmail dans Google Cloud Console → Utilisateurs tests (gen-lang-client-0797796121) et cochez la case d’accès Google Drive.';
-      } else if (/access_denied|validation|verified|blocked/i.test(rawMsg)) {
-        message =
-          'Accès refusé par Google (application en mode Test) : ajoutez ce compte Gmail dans les « Utilisateurs tests » de Google Cloud Console (gen-lang-client-0797796121).';
-      } else if (rawMsg) {
-        message = rawMsg;
-      }
+      const formatted = formatFirebaseGoogleError(err, inIframe);
+      const message =
+        !formatted.isUnauthorizedDomain && !formatted.isPopupOrTestIssue && err instanceof Error && err.message
+          ? err.message
+          : formatted.message;
       setStatusError(message);
       onNotify?.(message, 'err');
     } finally {

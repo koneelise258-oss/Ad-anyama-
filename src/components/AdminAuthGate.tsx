@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Lock, ArrowLeft, AlertCircle, ShieldCheck, ExternalLink, LogIn } from 'lucide-react';
+import { Lock, ArrowLeft, AlertCircle, ShieldCheck, ExternalLink, LogIn, Copy, Check } from 'lucide-react';
 import { api, setSessionToken } from '../services/api';
 import {
+  formatFirebaseGoogleError,
   isInsideIframe,
   isStandalonePwa,
   shouldUseRedirectFallback,
@@ -24,9 +25,12 @@ export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(initialError);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   const inIframe = isInsideIframe();
   const inStandalonePwa = isStandalonePwa();
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isDomainError = /non encore autorisé|unauthorized-domain|Domaine non autorisé/i.test(error);
 
   const handleDirectRedirect = async () => {
     setError('');
@@ -35,7 +39,7 @@ export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
       await startGoogleIdentityRedirect();
     } catch (err: any) {
       setIsSubmitting(false);
-      setError(err instanceof Error ? err.message : 'Impossible de lancer la redirection Google.');
+      setError(formatFirebaseGoogleError(err, inIframe).message);
     }
   };
 
@@ -55,32 +59,11 @@ export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
       setSessionToken(res.token);
       onAuthenticated(res.admin);
     } catch (err: any) {
-      const code = String(err?.code || '');
-      const rawMsg = err instanceof Error ? err.message : '';
-
       if (shouldUseRedirectFallback(err) && !inIframe) {
         await handleDirectRedirect();
         return;
       }
-
-      if (code === 'auth/unauthorized-domain') {
-        const host = typeof window !== 'undefined' ? window.location.hostname : '';
-        setError(
-          `Domaine non autorisé pour la connexion Google (${host}). Ajoutez « ${host} » dans Firebase Authentication → Paramètres → Domaines autorisés.`
-        );
-      } else if (
-        code === 'auth/popup-blocked' ||
-        code === 'auth/popup-closed-by-user' ||
-        code === 'auth/cancelled-popup-request'
-      ) {
-        setError(
-          inIframe
-            ? 'La fenêtre Google a été bloquée ou fermée dans l’aperçu intégré. Ouvrez le site dans un nouvel onglet pour vous connecter sans blocage, et vérifiez que votre Gmail est bien dans Google Cloud Console → Utilisateurs tests.'
-            : 'Connexion Google interrompue ou bloquée par le navigateur. Essayez la connexion directe ci-dessous.'
-        );
-      } else {
-        setError(rawMsg || 'Accès refusé. Utilisez un compte Google autorisé.');
-      }
+      setError(formatFirebaseGoogleError(err, inIframe).message);
     } finally {
       setIsSubmitting(false);
     }
@@ -113,8 +96,37 @@ export const AdminAuthGate: React.FC<AdminAuthGateProps> = ({
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs sm:text-sm text-red-800">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0 flex-1">
               <p>{error}</p>
+              {isDomainError && currentHost && (
+                <div className="space-y-1.5 rounded-lg border border-red-200 bg-white/85 p-2.5 text-xs text-church-navy">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <code className="break-all font-mono font-semibold text-red-900">{currentHost}</code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(currentHost).then(() => {
+                          setCopiedDomain(true);
+                          setTimeout(() => setCopiedDomain(false), 2500);
+                        });
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-church-line bg-church-light px-2 py-1 text-[11px] font-semibold text-church-navy hover:bg-church-tint"
+                    >
+                      {copiedDomain ? <Check className="h-3 w-3 text-emerald-700" /> : <Copy className="h-3 w-3" />}
+                      {copiedDomain ? 'Copié' : 'Copier le domaine'}
+                    </button>
+                  </div>
+                  <a
+                    href="https://console.firebase.google.com/project/gen-lang-client-0797796121/authentication/settings"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-church-blue underline"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Ajouter dans Firebase → Domaines autorisés
+                  </a>
+                </div>
+              )}
               {inIframe && (
                 <a
                   href={openInNewTabUrl}

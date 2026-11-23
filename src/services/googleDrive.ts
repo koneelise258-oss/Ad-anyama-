@@ -1,6 +1,4 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  getAuth,
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
@@ -8,13 +6,10 @@ import {
   onAuthStateChanged,
   type UserCredential
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { auth } from './firebase';
 
 export const SCOPES = ['https://www.googleapis.com/auth/drive.readonly'];
 const REDIRECT_MODE_KEY = 'eeadci_auth_redirect_mode';
-
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const auth = getAuth(app);
 
 export interface DriveAccountSession {
   email: string;
@@ -260,6 +255,56 @@ export const connectGoogleDriveAccount = async (loginHint?: string): Promise<Dri
   }
 
   return verifyAndRegisterDriveSession(result, accessToken);
+};
+
+export const formatFirebaseGoogleError = (
+  err: unknown,
+  inIframe = isInsideIframe()
+): { message: string; isUnauthorizedDomain: boolean; domain: string; isPopupOrTestIssue: boolean } => {
+  const code = String((err as { code?: string })?.code || '');
+  const rawMsg = err instanceof Error ? err.message : String(err || '');
+  const domain = typeof window !== 'undefined' ? window.location.hostname : '';
+
+  if (code === 'auth/unauthorized-domain' || /unauthorized-domain/i.test(rawMsg)) {
+    return {
+      isUnauthorizedDomain: true,
+      isPopupOrTestIssue: false,
+      domain,
+      message: `Ce domaine (« ${domain} ») n’est pas encore autorisé dans Firebase Authentication. Ajoutez « ${domain} » dans Firebase Console → Authentication → Settings → Authorized domains.`
+    };
+  }
+
+  if (
+    code === 'auth/popup-blocked' ||
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request'
+  ) {
+    return {
+      isUnauthorizedDomain: false,
+      isPopupOrTestIssue: true,
+      domain,
+      message: inIframe
+        ? 'La fenêtre Google a été bloquée ou fermée dans l’aperçu intégré. Ouvrez le site dans un nouvel onglet pour vous connecter sans blocage.'
+        : 'Connexion Google interrompue ou bloquée par le navigateur. Essayez la connexion directe ci-dessous.'
+    };
+  }
+
+  if (/access_denied|validation|verified|blocked/i.test(rawMsg)) {
+    return {
+      isUnauthorizedDomain: false,
+      isPopupOrTestIssue: true,
+      domain,
+      message:
+        'Accès refusé par Google (application en mode Test) : vérifiez que votre compte Gmail est bien ajouté dans Google Cloud Console → Utilisateurs tests.'
+    };
+  }
+
+  return {
+    isUnauthorizedDomain: false,
+    isPopupOrTestIssue: false,
+    domain,
+    message: rawMsg || 'Accès refusé. Utilisez un compte Google autorisé.'
+  };
 };
 
 export const signInGoogleForIdentity = async (

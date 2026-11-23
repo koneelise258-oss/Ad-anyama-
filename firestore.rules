@@ -1,0 +1,474 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasVerifiedEmail() {
+      return isAuthenticated()
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrapAdmin() {
+      return hasVerifiedEmail()
+        && (
+          request.auth.token.email.lower() == 'koneelise258@gmail.com'
+          || request.auth.token.email.lower() == 'mikeyservice98@gmail.com'
+        );
+    }
+
+    function isAdmin() {
+      return isBootstrapAdmin()
+        || (
+          isAuthenticated()
+          && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        )
+        || (
+          hasVerifiedEmail()
+          && exists(/databases/$(database)/documents/authorized_emails/$(request.auth.token.email.lower()))
+        );
+    }
+
+    function isValidDocId(id) {
+      return id is string
+        && id.size() >= 1
+        && id.size() <= 160
+        && id.matches('^[a-zA-Z0-9._@+-]+$');
+    }
+
+    function isValidEmailKey(key) {
+      return key is string
+        && key.size() >= 5
+        && key.size() <= 160
+        && key.matches('^[^/\\s@]+@[^/\\s@]+\\.[^/\\s@]+$');
+    }
+
+    function isValidHexSha256(id) {
+      return id is string
+        && id.size() == 64
+        && id.matches('^[a-f0-9]{64}$');
+    }
+
+    function isNonNegInt(val) {
+      return val is int && val >= 0;
+    }
+
+    // ===============================================================
+    // Connectivity Probe
+    // ===============================================================
+
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+      allow list: if false;
+      allow create, update: if isAdmin()
+        && docId == 'connection'
+        && request.resource.data.keys().hasAll(['ok'])
+        && request.resource.data.keys().hasOnly(['ok', 'updatedAt'])
+        && request.resource.data.ok is bool;
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // Public Site Settings (Non-sensitive; fetch via getDoc by ID)
+    // ===============================================================
+
+    match /settings/{settingId} {
+      allow get: if settingId in ['church', 'hero', 'siteImages', 'meta'];
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && settingId in ['church', 'hero', 'siteImages', 'meta'];
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // Confidential Admin Security Config
+    // ===============================================================
+
+    match /security_config/{configId} {
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin()
+        && configId == 'gate'
+        && request.resource.data.keys().hasAll(['secretGateSlug', 'sessionTimeoutMinutes'])
+        && request.resource.data.keys().hasOnly([
+          'secretGateSlug',
+          'enableKeyboardShortcut',
+          'enableFooterTap',
+          'sessionTimeoutMinutes',
+          'updatedAt'
+        ])
+        && request.resource.data.secretGateSlug is string
+        && request.resource.data.secretGateSlug.size() >= 4
+        && request.resource.data.secretGateSlug.size() <= 60
+        && request.resource.data.sessionTimeoutMinutes is int
+        && request.resource.data.sessionTimeoutMinutes >= 15
+        && request.resource.data.sessionTimeoutMinutes <= 1440;
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // Admins & Authorized Whitelist
+    // ===============================================================
+
+    match /admins/{uid} {
+      allow get: if isAdmin() || (isAuthenticated() && request.auth.uid == uid);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin()
+        && isValidDocId(uid)
+        && request.resource.data.keys().hasAll(['uid', 'id', 'name', 'identifier', 'role', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'id', 'name', 'identifier', 'role', 'createdAt', 'lastLoginAt'])
+        && request.resource.data.uid == uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.identifier is string
+        && request.resource.data.identifier.size() >= 5
+        && request.resource.data.identifier.size() <= 160
+        && request.resource.data.role is string
+        && request.resource.data.role.size() >= 2
+        && request.resource.data.role.size() <= 80;
+      allow delete: if isAdmin() && uid != request.auth.uid;
+    }
+
+    match /authorized_emails/{emailKey} {
+      allow get: if isAdmin()
+        || (hasVerifiedEmail() && request.auth.token.email.lower() == emailKey);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin()
+        && isValidEmailKey(emailKey)
+        && request.resource.data.keys().hasAll(['email', 'name', 'role', 'status', 'invitedAt'])
+        && request.resource.data.keys().hasOnly(['email', 'name', 'role', 'status', 'invitedBy', 'invitedAt', 'registeredAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailKey
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.role is string
+        && request.resource.data.role.size() >= 2
+        && request.resource.data.role.size() <= 80
+        && request.resource.data.status in ['pending', 'active'];
+      allow delete: if isAdmin()
+        && !(hasVerifiedEmail() && request.auth.token.email.lower() == emailKey);
+    }
+
+    // ===============================================================
+    // Immutable Audit Logs
+    // ===============================================================
+
+    match /security_logs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && isValidDocId(logId)
+        && request.resource.data.keys().hasAll(['id', 'timestamp', 'event', 'actor', 'detail', 'severity'])
+        && request.resource.data.keys().hasOnly(['id', 'timestamp', 'event', 'actor', 'detail', 'severity'])
+        && request.resource.data.id == logId
+        && request.resource.data.event is string
+        && request.resource.data.event.size() <= 160
+        && request.resource.data.actor is string
+        && request.resource.data.actor.size() <= 120
+        && request.resource.data.detail is string
+        && request.resource.data.detail.size() <= 500
+        && request.resource.data.severity in ['info', 'warning', 'alert'];
+      allow update, delete: if false;
+    }
+
+    // ===============================================================
+    // Google Drive Accounts & Folders (Admin Only)
+    // ===============================================================
+
+    match /drive_accounts/{emailKey} {
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin()
+        && isValidEmailKey(emailKey)
+        && request.resource.data.keys().hasAll(['email', 'displayName', 'addedAt'])
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'photoLink', 'addedAt', 'lastSyncedAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.lower() == emailKey
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 160;
+      allow delete: if isAdmin();
+    }
+
+    match /drive_folders/{folderKey} {
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin()
+        && isValidDocId(folderKey)
+        && request.resource.data.keys().hasAll(['folderId', 'folderName', 'accountEmail', 'albumId', 'albumTitle', 'lastSyncedAt'])
+        && request.resource.data.keys().hasOnly(['id', 'folderId', 'folderName', 'accountEmail', 'albumId', 'albumTitle', 'lastSyncedAt', 'photoCount'])
+        && request.resource.data.folderId is string
+        && request.resource.data.albumId is string;
+      allow delete: if isAdmin();
+    }
+
+    // ===============================================================
+    // Web Push Subscriptions & History
+    // ===============================================================
+
+    match /push_subscriptions/{subId} {
+      allow get, list: if isAdmin();
+      allow create, update: if isValidHexSha256(subId)
+        && request.resource.data.keys().hasAll(['id', 'endpoint', 'keys', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['id', 'endpoint', 'expirationTime', 'keys', 'createdAt'])
+        && request.resource.data.id == subId
+        && request.resource.data.endpoint is string
+        && request.resource.data.endpoint.size() >= 10
+        && request.resource.data.endpoint.size() <= 1024
+        && request.resource.data.endpoint.matches('^https://.*')
+        && request.resource.data.keys is map
+        && request.resource.data.keys.keys().hasAll(['p256dh', 'auth'])
+        && request.resource.data.keys.p256dh is string
+        && request.resource.data.keys.p256dh.size() <= 512
+        && request.resource.data.keys.auth is string
+        && request.resource.data.keys.auth.size() <= 256;
+      allow delete: if isAdmin();
+    }
+
+    match /push_history/{historyId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && isValidDocId(historyId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'body', 'url', 'sentAt', 'recipientCount'])
+        && request.resource.data.keys().hasOnly(['id', 'title', 'body', 'url', 'sentAt', 'recipientCount'])
+        && request.resource.data.id == historyId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 160
+        && request.resource.data.body is string
+        && request.resource.data.body.size() <= 500
+        && isNonNegInt(request.resource.data.recipientCount);
+      allow update, delete: if false;
+    }
+
+    // ===============================================================
+    // Church Content Collections (Cultes, Events, News, Albums, Departments)
+    // ===============================================================
+
+    function isValidPublicCulteUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let prevViews = resource.data.get('viewsCount', 0);
+      let prevComments = resource.data.get('comments', []);
+      let prevReactions = resource.data.get('reactions', {'likes': 0, 'hearts': 0, 'prayers': 0});
+      return resource.data.status == 'publie'
+        && changed.hasOnly(['reactions', 'comments', 'viewsCount'])
+        && (
+          !changed.hasAny(['viewsCount'])
+          || (
+            isNonNegInt(request.resource.data.viewsCount)
+            && request.resource.data.viewsCount <= prevViews + 1
+          )
+        )
+        && (
+          !changed.hasAny(['comments'])
+          || (
+            request.resource.data.comments is list
+            && request.resource.data.comments.size() >= prevComments.size()
+            && request.resource.data.comments.size() <= prevComments.size() + 1
+            && request.resource.data.comments.size() <= 500
+          )
+        )
+        && (
+          !changed.hasAny(['reactions'])
+          || (
+            request.resource.data.reactions is map
+            && request.resource.data.reactions.keys().hasOnly(['likes', 'hearts', 'prayers'])
+            && isNonNegInt(request.resource.data.reactions.likes)
+            && isNonNegInt(request.resource.data.reactions.hearts)
+            && isNonNegInt(request.resource.data.reactions.prayers)
+            && request.resource.data.reactions.likes <= prevReactions.get('likes', 0) + 1
+            && request.resource.data.reactions.hearts <= prevReactions.get('hearts', 0) + 1
+            && request.resource.data.reactions.prayers <= prevReactions.get('prayers', 0) + 1
+          )
+        );
+    }
+
+    match /cultes/{culteId} {
+      allow get, list: if (resource != null && resource.data.status == 'publie') || isAdmin();
+      allow create: if isAdmin()
+        && isValidDocId(culteId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'date', 'status'])
+        && request.resource.data.id == culteId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 300
+        && request.resource.data.status in ['publie', 'programme', 'brouillon'];
+      allow update: if (
+        isAdmin()
+        && isValidDocId(culteId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'date', 'status'])
+        && request.resource.data.id == culteId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 300
+        && request.resource.data.status in ['publie', 'programme', 'brouillon']
+      ) || isValidPublicCulteUpdate();
+      allow delete: if isAdmin();
+    }
+
+    function isValidPublicEventUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let prevViews = resource.data.get('viewsCount', 0);
+      let prevLikes = resource.data.get('likes', 0);
+      let prevAttendees = resource.data.get('attendeesCount', 0);
+      let prevComments = resource.data.get('comments', []);
+      return changed.hasOnly(['likes', 'attendeesCount', 'comments', 'poll', 'viewsCount'])
+        && (
+          !changed.hasAny(['viewsCount'])
+          || (isNonNegInt(request.resource.data.viewsCount) && request.resource.data.viewsCount <= prevViews + 1)
+        )
+        && (
+          !changed.hasAny(['likes'])
+          || (isNonNegInt(request.resource.data.likes) && request.resource.data.likes <= prevLikes + 1)
+        )
+        && (
+          !changed.hasAny(['attendeesCount'])
+          || (
+            isNonNegInt(request.resource.data.attendeesCount)
+            && request.resource.data.attendeesCount >= prevAttendees - 1
+            && request.resource.data.attendeesCount <= prevAttendees + 1
+          )
+        )
+        && (
+          !changed.hasAny(['comments'])
+          || (
+            request.resource.data.comments is list
+            && request.resource.data.comments.size() >= prevComments.size()
+            && request.resource.data.comments.size() <= prevComments.size() + 1
+            && request.resource.data.comments.size() <= 500
+          )
+        )
+        && (
+          !changed.hasAny(['poll'])
+          || (
+            request.resource.data.poll is map
+            && resource.data.poll is map
+            && request.resource.data.poll.question == resource.data.poll.question
+            && isNonNegInt(request.resource.data.poll.totalVotes)
+            && request.resource.data.poll.totalVotes <= resource.data.poll.get('totalVotes', 0) + 1
+          )
+        );
+    }
+
+    match /events/{eventId} {
+      allow get, list: if true;
+      allow create: if isAdmin()
+        && isValidDocId(eventId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'category', 'date'])
+        && request.resource.data.id == eventId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 300;
+      allow update: if (
+        isAdmin()
+        && isValidDocId(eventId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'category', 'date'])
+        && request.resource.data.id == eventId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 300
+      ) || isValidPublicEventUpdate();
+      allow delete: if isAdmin();
+    }
+
+    function isValidPublicNewsUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let prevReads = resource.data.get('readsCount', 0);
+      let prevLikes = resource.data.get('likes', 0);
+      let prevComments = resource.data.get('comments', []);
+      return changed.hasOnly(['likes', 'readsCount', 'comments'])
+        && (
+          !changed.hasAny(['readsCount'])
+          || (isNonNegInt(request.resource.data.readsCount) && request.resource.data.readsCount <= prevReads + 1)
+        )
+        && (
+          !changed.hasAny(['likes'])
+          || (isNonNegInt(request.resource.data.likes) && request.resource.data.likes <= prevLikes + 1)
+        )
+        && (
+          !changed.hasAny(['comments'])
+          || (
+            request.resource.data.comments is list
+            && request.resource.data.comments.size() >= prevComments.size()
+            && request.resource.data.comments.size() <= prevComments.size() + 1
+            && request.resource.data.comments.size() <= 500
+          )
+        );
+    }
+
+    match /news/{newsId} {
+      allow get, list: if true;
+      allow create: if isAdmin()
+        && isValidDocId(newsId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'category', 'date'])
+        && request.resource.data.id == newsId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 300;
+      allow update: if (
+        isAdmin()
+        && isValidDocId(newsId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'category', 'date'])
+        && request.resource.data.id == newsId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 300
+      ) || isValidPublicNewsUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /albums/{albumId} {
+      allow get, list: if true;
+      allow create: if isAdmin()
+        && isValidDocId(albumId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'category', 'type', 'date'])
+        && request.resource.data.id == albumId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 300
+        && request.resource.data.type in ['photo', 'video', 'mixte'];
+      allow update: if (
+        isAdmin()
+        && isValidDocId(albumId)
+        && request.resource.data.keys().hasAll(['id', 'title', 'category', 'type', 'date'])
+        && request.resource.data.id == albumId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 300
+        && request.resource.data.type in ['photo', 'video', 'mixte']
+      ) || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewsCount'])
+        && isNonNegInt(request.resource.data.viewsCount)
+        && request.resource.data.viewsCount <= resource.data.get('viewsCount', 0) + 1
+      );
+      allow delete: if isAdmin();
+
+      match /items/{itemId} {
+        allow get, list: if true;
+        allow create, update: if isAdmin()
+          && isValidDocId(itemId)
+          && request.resource.data.keys().hasAll(['id', 'type', 'url'])
+          && request.resource.data.id == itemId
+          && request.resource.data.type in ['photo', 'video', 'audio']
+          && request.resource.data.url is string
+          && request.resource.data.url.size() >= 1;
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /departments/{deptId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin()
+        && isValidDocId(deptId)
+        && request.resource.data.keys().hasAll(['id', 'code', 'name'])
+        && request.resource.data.id == deptId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 160;
+      allow delete: if isAdmin();
+    }
+  }
+}
